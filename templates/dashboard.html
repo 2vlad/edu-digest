@@ -23,7 +23,7 @@
                 <div class="d-flex">
                     <div class="flex-grow-1">
                         <p class="card-category text-muted">Активные каналы</p>
-                        <h3 class="card-title">{{ stats.active_channels }}</h3>
+                        <h3 class="card-title" id="active-channels-count">{{ stats.active_channels }}</h3>
                     </div>
                     <div class="align-self-center">
                         <i class="fas fa-list fa-2x text-info"></i>
@@ -39,7 +39,7 @@
                 <div class="d-flex">
                     <div class="flex-grow-1">
                         <p class="card-category text-muted">Запусков (24ч)</p>
-                        <h3 class="card-title">{{ stats.successful_runs_24h }}</h3>
+                        <h3 class="card-title" id="runs-24h-count">{{ stats.successful_runs_24h }}</h3>
                     </div>
                     <div class="align-self-center">
                         <i class="fas fa-play-circle fa-2x text-success"></i>
@@ -55,7 +55,7 @@
                 <div class="d-flex">
                     <div class="flex-grow-1">
                         <p class="card-category text-muted">Новостей (24ч)</p>
-                        <h3 class="card-title">{{ stats.news_published_24h }}</h3>
+                        <h3 class="card-title" id="news-24h-count">{{ stats.news_published_24h }}</h3>
                     </div>
                     <div class="align-self-center">
                         <i class="fas fa-newspaper fa-2x text-warning"></i>
@@ -71,7 +71,7 @@
                 <div class="d-flex">
                     <div class="flex-grow-1">
                         <p class="card-category text-muted">Сообщений (24ч)</p>
-                        <h3 class="card-title">{{ stats.messages_collected_24h }}</h3>
+                        <h3 class="card-title" id="messages-24h-count">{{ stats.messages_collected_24h }}</h3>
                     </div>
                     <div class="align-self-center">
                         <i class="fas fa-envelope fa-2x text-primary"></i>
@@ -187,11 +187,16 @@ setInterval(function() {
     fetch('/api/stats')
         .then(response => response.json())
         .then(data => {
-            // Обновляем числа на карточках
-            document.querySelector('.card-stats:nth-child(1) .card-title').textContent = data.active_channels;
-            document.querySelector('.card-stats:nth-child(2) .card-title').textContent = data.successful_runs_24h;
-            document.querySelector('.card-stats:nth-child(3) .card-title').textContent = data.news_published_24h;
-            document.querySelector('.card-stats:nth-child(4) .card-title').textContent = data.messages_collected_24h;
+            // Обновляем числа на карточках через ID
+            const activeChannelsEl = document.getElementById('active-channels-count');
+            const runs24hEl = document.getElementById('runs-24h-count'); 
+            const news24hEl = document.getElementById('news-24h-count');
+            const messages24hEl = document.getElementById('messages-24h-count');
+            
+            if (activeChannelsEl) activeChannelsEl.textContent = data.active_channels || 0;
+            if (runs24hEl) runs24hEl.textContent = data.successful_runs_24h || 0;
+            if (news24hEl) news24hEl.textContent = data.news_published_24h || 0;
+            if (messages24hEl) messages24hEl.textContent = data.messages_collected_24h || 0;
         })
         .catch(error => console.log('Ошибка обновления статистики:', error));
 }, 30000);
