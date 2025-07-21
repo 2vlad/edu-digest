@@ -13,7 +13,8 @@
 
 ### Settings → API
 - `SUPABASE_URL` - Project URL (например: `https://your-project.supabase.co`)  
-- `SUPABASE_ANON_KEY` - anon public key
+- `SUPABASE_ANON_KEY` - anon public key (обязательный для Supabase client)
+- `SUPABASE_SERVICE_KEY` - service role key (опционально, для админских операций)
 
 ### Settings → Database
 - `DATABASE_URL` - Connection string для прямого подключения к PostgreSQL
@@ -24,12 +25,12 @@
 В Railway добавьте следующие переменные:
 
 ```bash
-# Supabase настройки
+# Supabase настройки (все три обязательные)
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key-here
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...  # из Settings → API → anon public
 DATABASE_URL=postgresql://postgres:your-password@db.your-project.supabase.co:5432/postgres
 
-# Существующие переменные Telegram и Claude
+# Существующие переменные Telegram и Claude  
 TELEGRAM_API_ID=your-api-id
 TELEGRAM_API_HASH=your-api-hash
 TELEGRAM_BOT_TOKEN=your-bot-token
@@ -39,14 +40,19 @@ ANTHROPIC_API_KEY=your-claude-key
 FLASK_SECRET_KEY=your-secret-key
 ```
 
+**⚠️ Важно:** Для полноценной работы нужны ВСЕ три переменные:
+- `SUPABASE_URL` - для определения проекта
+- `SUPABASE_ANON_KEY` - для Supabase client API
+- `DATABASE_URL` - для прямого подключения к PostgreSQL
+
 ## 4. Локальная разработка
 
 Создайте файл `.env` в корне проекта:
 
 ```env
-# Supabase настройки
+# Supabase настройки (скопируйте из Supabase Dashboard)
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key-here
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 DATABASE_URL=postgresql://postgres:your-password@db.your-project.supabase.co:5432/postgres
 
 # Остальные настройки...
@@ -55,6 +61,14 @@ TELEGRAM_API_HASH=your-api-hash
 TELEGRAM_BOT_TOKEN=your-bot-token
 ANTHROPIC_API_KEY=your-claude-key
 ```
+
+**💡 Получение ключей в Supabase:**
+1. Откройте ваш проект в Supabase
+2. Перейдите в Settings → API
+3. Скопируйте **Project URL** в `SUPABASE_URL`
+4. Скопируйте **anon public** ключ в `SUPABASE_ANON_KEY`
+5. Перейдите в Settings → Database
+6. Скопируйте **Connection string** и замените `[YOUR-PASSWORD]` на ваш пароль
 
 ## 5. Автоматическое создание таблиц
 
@@ -66,10 +80,32 @@ ANTHROPIC_API_KEY=your-claude-key
 
 ## 6. Проверка работы
 
-После настройки переменных окружения:
+### Быстрая проверка настроек
+```bash
+# Проверим правильность всех настроек Supabase
+python test_supabase_config.py
+```
+
+Этот скрипт проверит:
+- ✅ Наличие всех необходимых переменных
+- ✅ Правильность формата ключей и URL
+- ✅ Подключение к базе данных
+- ✅ Создание таблиц
+
+### Полная проверка приложения
+
+После успешной проверки настроек:
 
 1. **Railway**: деплой автоматически создаст таблицы при первом запуске
 2. **Локально**: запустите `python -m src` и проверьте логи
+
+Если в логах видите:
+```
+🐘 Using PostgreSQL: https://your-project.supabase.co
+✅ Supabase client инициализирован
+✅ PostgreSQL подключение установлено
+```
+То всё настроено правильно!
 
 ## 7. Fallback на SQLite
 

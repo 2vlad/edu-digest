@@ -14,12 +14,27 @@ ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 
 # База данных - Supabase (PostgreSQL)
 SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_ANON_KEY')
+SUPABASE_KEY = os.getenv('SUPABASE_ANON_KEY')  # Anon/Public API Key
+SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY')  # Service Role Key (опционально)
 DATABASE_URL = os.getenv('DATABASE_URL')  # PostgreSQL connection string
 
+# Валидация Supabase конфигурации
+def validate_supabase_config():
+    """Проверяем корректность настроек Supabase"""
+    if SUPABASE_URL and not SUPABASE_KEY:
+        print("❌ Ошибка: SUPABASE_URL указан, но отсутствует SUPABASE_ANON_KEY")
+        return False
+    if SUPABASE_KEY and not SUPABASE_URL:
+        print("❌ Ошибка: SUPABASE_ANON_KEY указан, но отсутствует SUPABASE_URL")
+        return False
+    return True
+
 # Поддержка старого SQLite для локальной разработки (fallback)
-if not DATABASE_URL and not SUPABASE_URL:
-    print("⚠️ Supabase не настроен, используем SQLite fallback")
+if not validate_supabase_config() or (not DATABASE_URL and not SUPABASE_URL):
+    if not validate_supabase_config():
+        print("⚠️ Неправильная конфигурация Supabase, используем SQLite fallback")
+    else:
+        print("⚠️ Supabase не настроен, используем SQLite fallback")
     if os.getenv('RAILWAY_ENVIRONMENT'):
         print("🚄 Railway environment detected")
         try:

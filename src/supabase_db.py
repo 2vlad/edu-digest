@@ -44,6 +44,17 @@ class SupabaseDB:
         try:
             logger.info("🔗 Инициализация подключения к Supabase...")
             
+            # Проверка конфигурации
+            if not SUPABASE_URL:
+                raise ValueError("❌ SUPABASE_URL не настроен")
+            if not SUPABASE_KEY:
+                raise ValueError("❌ SUPABASE_ANON_KEY не настроен")
+            if not DATABASE_URL:
+                raise ValueError("❌ DATABASE_URL не настроен")
+            
+            logger.info(f"🔍 Supabase URL: {SUPABASE_URL}")
+            logger.info(f"🔑 API Key: {SUPABASE_KEY[:20]}..." if SUPABASE_KEY else "❌ API Key не найден")
+            
             # Подключение через Supabase client
             if SUPABASE_URL and SUPABASE_KEY:
                 self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -63,6 +74,11 @@ class SupabaseDB:
             
         except Exception as e:
             logger.error(f"❌ Ошибка инициализации Supabase: {e}")
+            if "SUPABASE_URL" in str(e) or "SUPABASE_ANON_KEY" in str(e) or "DATABASE_URL" in str(e):
+                logger.error("💡 Проверьте настройки в переменных окружения:")
+                logger.error("   - SUPABASE_URL (Project URL)")
+                logger.error("   - SUPABASE_ANON_KEY (anon public key)")  
+                logger.error("   - DATABASE_URL (PostgreSQL connection string)")
             return False
     
     def get_connection(self):
