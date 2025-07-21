@@ -20,6 +20,7 @@ from src.news_collector import NewsCollector
 from src.database import SettingsDB
 
 # Настройка логирования
+os.makedirs('logs', exist_ok=True)  # Создаем папку logs если не существует
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',

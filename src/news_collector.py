@@ -16,6 +16,8 @@ from .claude_summarizer import get_claude_summarizer
 from .telegram_bot import get_telegram_bot, TelegramChannelReader
 
 # Настройка логирования
+import os
+os.makedirs('logs', exist_ok=True)  # Создаем папку logs если не существует
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',

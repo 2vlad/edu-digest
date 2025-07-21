@@ -11,6 +11,8 @@ from .config import TELEGRAM_API_ID, TELEGRAM_API_HASH
 from .database import ChannelsDB, ProcessedMessagesDB
 
 # Настройка логирования
+import os
+os.makedirs('logs', exist_ok=True)  # Создаем папку logs если не существует
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',

@@ -9,6 +9,7 @@ except ImportError:
     from config import DATABASE_PATH
 
 # Настройка логирования
+os.makedirs('logs', exist_ok=True)  # Создаем папку logs если не существует
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',

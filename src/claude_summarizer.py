@@ -11,6 +11,8 @@ from .config import ANTHROPIC_API_KEY
 from .database import SettingsDB
 
 # Настройка логирования
+import os
+os.makedirs('logs', exist_ok=True)  # Создаем папку logs если не существует
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
