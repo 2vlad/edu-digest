@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Адаптер базы данных - СТРОГО ТОЛЬКО SUPABASE PostgreSQL
-Никаких fallback на SQLite!
+Адаптер базы данных - PostgreSQL первичная, SQLite fallback
+Показывает четкие ошибки если PostgreSQL не настроен
 """
 
 import logging
@@ -11,7 +11,7 @@ from typing import List, Dict, Optional, Any
 # Настройка детального логирования
 os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
-    level=logging.DEBUG,  # Самый детальный уровень
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('logs/db_adapter.log'),
@@ -20,8 +20,7 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-logger.info("🚀 Initializing DB Adapter - SUPABASE ONLY MODE")
+logger.info("🚀 Initializing DB Adapter - Production Mode")
 
 # Импортируем конфигурацию
 try:
@@ -44,203 +43,258 @@ logger.info(f"   DATABASE_URL: {'✅ Set' if DATABASE_URL else '❌ Missing'}")
 logger.info(f"   SUPABASE_URL: {'✅ Set' if SUPABASE_URL else '❌ Missing'}")
 logger.info(f"   SUPABASE_KEY: {'✅ Set' if SUPABASE_KEY else '❌ Missing'}")
 
-if not DATABASE_URL or not SUPABASE_URL:
-    logger.error("❌ CRITICAL: Supabase configuration missing!")
-    logger.error("💡 Required environment variables:")
-    logger.error("   - DATABASE_URL (PostgreSQL connection string)")
-    logger.error("   - SUPABASE_URL (Project URL)")
-    logger.error("   - SUPABASE_ANON_KEY (Anonymous key)")
-    raise ValueError("Supabase configuration missing - cannot proceed with SUPABASE ONLY mode")
+# Определяем доступность PostgreSQL
+has_postgres_config = bool(DATABASE_URL or (SUPABASE_URL and SUPABASE_KEY))
 
-# Импортируем Supabase модули
-logger.info("📦 Importing Supabase modules...")
-try:
-    from .supabase_db import (
-        init_supabase_database,
-        test_supabase_db,
-        SupabaseChannelsDB,
-        SupabaseSettingsDB,
-        SupabaseProcessedMessagesDB,
-        supabase_db
-    )
-    logger.info("✅ Supabase modules imported successfully")
-except ImportError as e:
-    logger.error(f"❌ Failed to import Supabase modules: {e}")
-    logger.info("🔄 Trying fallback import...")
+if has_postgres_config:
+    logger.info("✅ PostgreSQL configuration found - attempting to use Supabase")
     try:
-        from supabase_db import (
-            init_supabase_database,
-            test_supabase_db,
-            SupabaseChannelsDB,
-            SupabaseSettingsDB,
-            SupabaseProcessedMessagesDB,
-            supabase_db
-        )
-        logger.info("✅ Supabase modules imported via fallback")
-    except ImportError as fallback_error:
-        logger.error(f"❌ CRITICAL: Cannot import Supabase modules: {fallback_error}")
-        raise ImportError(f"Cannot import Supabase modules: {fallback_error}")
-
-# Создаем строго Supabase-only классы с детальным логированием
-class SupabaseOnlyChannelsDB:
-    @staticmethod
-    def add_channel(username: str, display_name: str = None, priority: int = 0) -> int:
-        logger.debug(f"🔵 ChannelsDB.add_channel called: username={username}, display_name={display_name}, priority={priority}")
+        # Импортируем PostgreSQL модули
         try:
-            result = SupabaseChannelsDB.add_channel(username, display_name, priority)
-            logger.info(f"✅ Channel added successfully: {username} -> ID {result}")
-            return result
-        except Exception as e:
-            logger.error(f"❌ FAILED to add channel {username}: {e}")
-            logger.error(f"🔍 Exception type: {type(e).__name__}")
-            import traceback
-            logger.error(f"📋 Traceback: {traceback.format_exc()}")
-            raise e  # Re-raise - NO FALLBACK!
-            
-    @staticmethod
-    def get_active_channels():
-        logger.debug("🔵 ChannelsDB.get_active_channels called")
-        try:
-            result = SupabaseChannelsDB.get_active_channels()
-            logger.info(f"✅ Active channels retrieved: {len(result)} channels")
-            for channel in result:
-                logger.debug(f"   📺 {channel.get('display_name', 'Unknown')} ({channel.get('username', 'Unknown')})")
-            return result
-        except Exception as e:
-            logger.error(f"❌ FAILED to get active channels: {e}")
-            logger.error(f"🔍 Exception type: {type(e).__name__}")
-            import traceback
-            logger.error(f"📋 Traceback: {traceback.format_exc()}")
-            raise e  # Re-raise - NO FALLBACK!
-            
-    @staticmethod
-    def update_last_message_id(channel_id: int, message_id: int):
-        logger.debug(f"🔵 ChannelsDB.update_last_message_id called: channel_id={channel_id}, message_id={message_id}")
-        try:
-            result = SupabaseChannelsDB.update_last_message_id(channel_id, message_id)
-            logger.info(f"✅ Last message ID updated for channel {channel_id}")
-            return result
-        except Exception as e:
-            logger.error(f"❌ FAILED to update last message ID for channel {channel_id}: {e}")
-            logger.error(f"🔍 Exception type: {type(e).__name__}")
-            import traceback
-            logger.error(f"📋 Traceback: {traceback.format_exc()}")
-            raise e  # Re-raise - NO FALLBACK!
-
-class SupabaseOnlySettingsDB:
-    @staticmethod
-    def get_setting(key: str, default: str = None):
-        logger.debug(f"🔵 SettingsDB.get_setting called: key={key}, default={default}")
-        try:
-            result = SupabaseSettingsDB.get_setting(key, default)
-            logger.info(f"✅ Setting retrieved: {key} = {result}")
-            return result
-        except Exception as e:
-            logger.error(f"❌ FAILED to get setting {key}: {e}")
-            logger.error(f"🔍 Exception type: {type(e).__name__}")
-            import traceback
-            logger.error(f"📋 Traceback: {traceback.format_exc()}")
-            raise e  # Re-raise - NO FALLBACK!
-            
-    @staticmethod
-    def set_setting(key: str, value: str, description: str = None):
-        logger.debug(f"🔵 SettingsDB.set_setting called: key={key}, value={value}, description={description}")
-        try:
-            result = SupabaseSettingsDB.set_setting(key, value, description)
-            logger.info(f"✅ Setting updated: {key} = {value}")
-            return result
-        except Exception as e:
-            logger.error(f"❌ FAILED to set setting {key}: {e}")
-            logger.error(f"🔍 Exception type: {type(e).__name__}")
-            import traceback
-            logger.error(f"📋 Traceback: {traceback.format_exc()}")
-            raise e  # Re-raise - NO FALLBACK!
-
-class SupabaseOnlyProcessedMessagesDB:
-    @staticmethod
-    def is_message_processed(channel_id: int, message_id: int) -> bool:
-        logger.debug(f"🔵 ProcessedMessagesDB.is_message_processed called: channel_id={channel_id}, message_id={message_id}")
-        try:
-            result = SupabaseProcessedMessagesDB.is_message_processed(channel_id, message_id)
-            logger.debug(f"✅ Message processed check: {result}")
-            return result
-        except Exception as e:
-            logger.error(f"❌ FAILED to check if message processed: {e}")
-            logger.error(f"🔍 Exception type: {type(e).__name__}")
-            import traceback
-            logger.error(f"📋 Traceback: {traceback.format_exc()}")
-            raise e  # Re-raise - NO FALLBACK!
-            
-    @staticmethod
-    def mark_message_processed(channel_id: int, message_id: int, message_text: str = None, summary: str = None) -> int:
-        logger.debug(f"🔵 ProcessedMessagesDB.mark_message_processed called: channel_id={channel_id}, message_id={message_id}")
-        try:
-            result = SupabaseProcessedMessagesDB.mark_message_processed(channel_id, message_id, message_text, summary)
-            logger.info(f"✅ Message marked as processed: ID {result}")
-            return result
-        except Exception as e:
-            logger.error(f"❌ FAILED to mark message as processed: {e}")
-            logger.error(f"🔍 Exception type: {type(e).__name__}")
-            import traceback
-            logger.error(f"📋 Traceback: {traceback.format_exc()}")
-            raise e  # Re-raise - NO FALLBACK!
-
-# Экспортируем Supabase-only классы
-ChannelsDB = SupabaseOnlyChannelsDB
-SettingsDB = SupabaseOnlySettingsDB
-ProcessedMessagesDB = SupabaseOnlyProcessedMessagesDB
-
-def create_connection():
-    """Получение подключения СТРОГО только к Supabase"""
-    logger.debug("🔵 create_connection called")
-    try:
-        if not supabase_db.initialized:
-            logger.info("🔧 Supabase not initialized, initializing...")
-            if not supabase_db.initialize():
-                raise Exception("Supabase initialization failed")
+            from .supabase_db import (
+                init_supabase_database,
+                test_supabase_db,
+                SupabaseChannelsDB,
+                SupabaseSettingsDB,
+                SupabaseProcessedMessagesDB,
+                supabase_db
+            )
+            logger.info("✅ PostgreSQL modules imported successfully")
+        except ImportError:
+            from supabase_db import (
+                init_supabase_database,
+                test_supabase_db,
+                SupabaseChannelsDB,
+                SupabaseSettingsDB,
+                SupabaseProcessedMessagesDB,
+                supabase_db
+            )
+            logger.info("✅ PostgreSQL modules imported via fallback")
         
-        connection = supabase_db.get_connection()
-        logger.info("✅ Supabase connection established")
-        return connection
+        # Используем PostgreSQL классы с логированием
+        class LoggedChannelsDB:
+            @staticmethod
+            def add_channel(username: str, display_name: str = None, priority: int = 0) -> int:
+                logger.debug(f"🔵 PostgreSQL: add_channel({username}, {display_name}, {priority})")
+                try:
+                    result = SupabaseChannelsDB.add_channel(username, display_name, priority)
+                    logger.info(f"✅ Channel added: {username} -> ID {result}")
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ PostgreSQL add_channel failed: {e}")
+                    raise
+                    
+            @staticmethod
+            def get_active_channels():
+                logger.debug("🔵 PostgreSQL: get_active_channels()")
+                try:
+                    result = SupabaseChannelsDB.get_active_channels()
+                    logger.info(f"✅ Retrieved {len(result)} channels")
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ PostgreSQL get_active_channels failed: {e}")
+                    raise
+                    
+            @staticmethod
+            def update_last_message_id(channel_id: int, message_id: int):
+                logger.debug(f"🔵 PostgreSQL: update_last_message_id({channel_id}, {message_id})")
+                try:
+                    result = SupabaseChannelsDB.update_last_message_id(channel_id, message_id)
+                    logger.info(f"✅ Updated last message ID for channel {channel_id}")
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ PostgreSQL update_last_message_id failed: {e}")
+                    raise
+        
+        class LoggedSettingsDB:
+            @staticmethod
+            def get_setting(key: str, default: str = None):
+                logger.debug(f"🔵 PostgreSQL: get_setting({key})")
+                try:
+                    result = SupabaseSettingsDB.get_setting(key, default)
+                    logger.debug(f"✅ Setting: {key} = {result}")
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ PostgreSQL get_setting failed: {e}")
+                    raise
+                    
+            @staticmethod
+            def set_setting(key: str, value: str, description: str = None):
+                logger.debug(f"🔵 PostgreSQL: set_setting({key}, {value})")
+                try:
+                    result = SupabaseSettingsDB.set_setting(key, value, description)
+                    logger.info(f"✅ Setting updated: {key} = {value}")
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ PostgreSQL set_setting failed: {e}")
+                    raise
+        
+        class LoggedProcessedMessagesDB:
+            @staticmethod
+            def is_message_processed(channel_id: int, message_id: int) -> bool:
+                logger.debug(f"🔵 PostgreSQL: is_message_processed({channel_id}, {message_id})")
+                try:
+                    result = SupabaseProcessedMessagesDB.is_message_processed(channel_id, message_id)
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ PostgreSQL is_message_processed failed: {e}")
+                    raise
+                    
+            @staticmethod
+            def mark_message_processed(channel_id: int, message_id: int, message_text: str = None, summary: str = None) -> int:
+                logger.debug(f"🔵 PostgreSQL: mark_message_processed({channel_id}, {message_id})")
+                try:
+                    result = SupabaseProcessedMessagesDB.mark_message_processed(channel_id, message_id, message_text, summary)
+                    logger.info(f"✅ Message marked as processed: ID {result}")
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ PostgreSQL mark_message_processed failed: {e}")
+                    raise
+        
+        # Используем PostgreSQL классы
+        ChannelsDB = LoggedChannelsDB
+        SettingsDB = LoggedSettingsDB
+        ProcessedMessagesDB = LoggedProcessedMessagesDB
+        
+        def create_connection():
+            logger.debug("🔵 PostgreSQL: create_connection()")
+            try:
+                if not supabase_db.initialized:
+                    logger.info("🔧 Initializing Supabase connection...")
+                    if not supabase_db.initialize():
+                        raise Exception("Supabase initialization failed")
+                
+                connection = supabase_db.get_connection()
+                logger.info("✅ PostgreSQL connection established")
+                return connection
+            except Exception as e:
+                logger.error(f"❌ PostgreSQL connection failed: {e}")
+                raise
+        
+        def init_database():
+            logger.debug("🔵 PostgreSQL: init_database()")
+            try:
+                logger.info("🚀 Initializing PostgreSQL database...")
+                result = init_supabase_database()
+                logger.info("✅ PostgreSQL database initialized")
+                return result
+            except Exception as e:
+                logger.error(f"❌ PostgreSQL init failed: {e}")
+                raise
+        
+        def test_db():
+            logger.debug("🔵 PostgreSQL: test_db()")
+            try:
+                result = test_supabase_db()
+                if result:
+                    logger.info("✅ PostgreSQL test passed")
+                else:
+                    logger.warning("⚠️ PostgreSQL test failed")
+                return result
+            except Exception as e:
+                logger.error(f"❌ PostgreSQL test failed: {e}")
+                raise
+                
+        logger.info("✅ Using PostgreSQL (Supabase) database")
+        
     except Exception as e:
-        logger.error(f"❌ FAILED to create Supabase connection: {e}")
-        logger.error(f"🔍 Exception type: {type(e).__name__}")
-        import traceback
-        logger.error(f"📋 Traceback: {traceback.format_exc()}")
-        raise e  # Re-raise - NO FALLBACK!
+        logger.error(f"❌ Failed to set up PostgreSQL: {e}")
+        logger.error("🔄 PostgreSQL configured but not working - check Supabase setup")
+        has_postgres_config = False
 
-def init_database():
-    """Инициализация БД СТРОГО только Supabase"""
-    logger.debug("🔵 init_database called")
+if not has_postgres_config:
+    # Fallback к SQLite
+    logger.warning("⚠️ PostgreSQL not available - using SQLite fallback")
+    logger.warning("🚨 THIS IS NOT RECOMMENDED FOR PRODUCTION!")
+    
     try:
-        logger.info("🚀 Initializing Supabase database...")
-        result = init_supabase_database()
-        logger.info("✅ Supabase database initialized successfully")
-        return result
-    except Exception as e:
-        logger.error(f"❌ FAILED to initialize Supabase database: {e}")
-        logger.error(f"🔍 Exception type: {type(e).__name__}")
-        import traceback
-        logger.error(f"📋 Traceback: {traceback.format_exc()}")
-        raise e  # Re-raise - NO FALLBACK!
+        from .database import (
+            init_database as _sqlite_init,
+            test_db as _sqlite_test,
+            ChannelsDB as _SQLiteChannelsDB,
+            SettingsDB as _SQLiteSettingsDB,
+            ProcessedMessagesDB as _SQLiteProcessedMessagesDB,
+            create_connection as _sqlite_connection,
+        )
+    except ImportError:
+        from database import (
+            init_database as _sqlite_init,
+            test_db as _sqlite_test,
+            ChannelsDB as _SQLiteChannelsDB,
+            SettingsDB as _SQLiteSettingsDB,
+            ProcessedMessagesDB as _SQLiteProcessedMessagesDB,
+            create_connection as _sqlite_connection,
+        )
+    
+    # Wrapper классы с предупреждениями
+    class FallbackChannelsDB:
+        @staticmethod
+        def add_channel(username: str, display_name: str = None, priority: int = 0) -> int:
+            logger.warning(f"⚠️ SQLite FALLBACK: add_channel({username})")
+            logger.warning("💡 Add PostgreSQL configuration for production use")
+            return _SQLiteChannelsDB.add_channel(username, display_name, priority)
+            
+        @staticmethod
+        def get_active_channels():
+            logger.warning("⚠️ SQLite FALLBACK: get_active_channels()")
+            return _SQLiteChannelsDB.get_active_channels()
+            
+        @staticmethod
+        def update_last_message_id(channel_id: int, message_id: int):
+            logger.warning(f"⚠️ SQLite FALLBACK: update_last_message_id({channel_id})")
+            return _SQLiteChannelsDB.update_last_message_id(channel_id, message_id)
+    
+    class FallbackSettingsDB:
+        @staticmethod
+        def get_setting(key: str, default: str = None):
+            logger.debug(f"⚠️ SQLite FALLBACK: get_setting({key})")
+            return _SQLiteSettingsDB.get_setting(key, default)
+            
+        @staticmethod
+        def set_setting(key: str, value: str, description: str = None):
+            logger.warning(f"⚠️ SQLite FALLBACK: set_setting({key})")
+            return _SQLiteSettingsDB.set_setting(key, value, description)
+    
+    class FallbackProcessedMessagesDB:
+        @staticmethod
+        def is_message_processed(channel_id: int, message_id: int) -> bool:
+            return _SQLiteProcessedMessagesDB.is_message_processed(channel_id, message_id)
+            
+        @staticmethod
+        def mark_message_processed(channel_id: int, message_id: int, message_text: str = None, summary: str = None) -> int:
+            return _SQLiteProcessedMessagesDB.mark_message_processed(channel_id, message_id, message_text, summary)
+    
+    ChannelsDB = FallbackChannelsDB
+    SettingsDB = FallbackSettingsDB  
+    ProcessedMessagesDB = FallbackProcessedMessagesDB
+    create_connection = _sqlite_connection
+    init_database = _sqlite_init
+    test_db = _sqlite_test
+    
+    logger.info("✅ Using SQLite fallback database")
 
-def test_db():
-    """Тестирование БД СТРОГО только Supabase"""
-    logger.debug("🔵 test_db called")
-    try:
-        logger.info("🧪 Testing Supabase database...")
-        result = test_supabase_db()
-        if result:
-            logger.info("✅ Supabase database test passed")
-        else:
-            logger.warning("⚠️ Supabase database test failed")
-        return result
-    except Exception as e:
-        logger.error(f"❌ FAILED to test Supabase database: {e}")
-        logger.error(f"🔍 Exception type: {type(e).__name__}")
-        import traceback
-        logger.error(f"📋 Traceback: {traceback.format_exc()}")
-        raise e  # Re-raise - NO FALLBACK!
+def get_database_info() -> Dict[str, Any]:
+    """Возвращает информацию о текущей базе данных"""
+    if has_postgres_config:
+        return {
+            'type': 'PostgreSQL (Supabase)',
+            'url': SUPABASE_URL,
+            'database_url': DATABASE_URL[:50] + "..." if DATABASE_URL else None,
+            'persistent': True,
+            'railway_compatible': True,
+            'fallback_available': True,
+            'production_ready': True
+        }
+    else:
+        from .config import DATABASE_PATH
+        return {
+            'type': 'SQLite (Fallback)',
+            'path': DATABASE_PATH,
+            'persistent': '/data/' in DATABASE_PATH if DATABASE_PATH else False,
+            'railway_compatible': False,
+            'fallback_available': False,
+            'production_ready': False
+        }
 
 # Экспортируем все необходимые функции и классы
 __all__ = [
@@ -250,45 +304,23 @@ __all__ = [
     'SettingsDB',
     'ProcessedMessagesDB',
     'create_connection',
+    'get_database_info'
 ]
 
-def get_database_info() -> Dict[str, Any]:
-    """Возвращает информацию о текущей базе данных"""
-    logger.debug("🔵 get_database_info called")
-    return {
-        'type': 'PostgreSQL (Supabase ONLY)',
-        'url': SUPABASE_URL,
-        'database_url': DATABASE_URL[:50] + "..." if DATABASE_URL else None,
-        'persistent': True,
-        'railway_compatible': True,
-        'fallback_available': False,  # Строго NO FALLBACK!
-        'supabase_only': True
-    }
-
 if __name__ == "__main__":
-    # Тестирование адаптера
-    logger.info("🧪 Testing DB Adapter in SUPABASE ONLY mode...")
+    logger.info("🧪 Testing DB Adapter...")
     
     db_info = get_database_info()
     logger.info(f"🗄️ Database info: {db_info}")
-    print(f"🗄️ Database info: {db_info}")
     
     try:
-        logger.info("🔧 Initializing database...")
         init_database()
-        logger.info("✅ Database initialized successfully!")
-        print("✅ Database initialized successfully!")
+        logger.info("✅ Database initialized!")
         
-        logger.info("🧪 Testing database...")
         if test_db():
             logger.info("✅ Database test passed!")
-            print("✅ Database test passed!")
         else:
             logger.error("❌ Database test failed!")
-            print("❌ Database test failed!")
             
     except Exception as e:
         logger.error(f"❌ Error: {e}")
-        print(f"❌ Error: {e}")
-        import traceback
-        logger.error(f"📋 Full traceback: {traceback.format_exc()}")
