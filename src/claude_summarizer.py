@@ -32,7 +32,7 @@ class ClaudeSummarizer:
         self.client = None
         self.initialized = False
         self.api_key = ANTHROPIC_API_KEY
-        self.model = "claude-3-sonnet-20240229"  # Используем Sonnet для качества
+        self.model = "claude-3-5-sonnet-20241022"  # Используем актуальный Sonnet для качества
         
         # Настройки по умолчанию
         self.max_tokens = 150

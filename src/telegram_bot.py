@@ -102,11 +102,10 @@ class TelegramBot:
                 logger.error("Бот не инициализирован")
                 return False
             
-            # Отправляем сообщение
+            # Отправляем сообщение (временно без parse_mode для устранения ошибок)
             message = await self.bot.send_message(
                 chat_id=TARGET_CHANNEL,
                 text=digest_text,
-                parse_mode='Markdown',
                 disable_web_page_preview=True
             )
             
