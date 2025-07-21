@@ -52,15 +52,45 @@ def get_run_logs(limit=20):
 
 def get_dashboard_stats():
     """Получение статистики для дашборда"""
-    conn = get_db()
-    cursor = conn.cursor()
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info("📊 Getting dashboard statistics...")
+    
     try:
+        logger.info("🔗 Getting database connection...")
+        conn = get_db()
+        cursor = conn.cursor()
+        logger.info("✅ Database connection established")
+        
+        # Проверяем существование таблиц
+        logger.info("🔍 Checking if tables exist...")
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+        logger.info(f"📋 Available tables: {tables}")
+        
+        if 'channels' not in tables:
+            logger.error("❌ Table 'channels' does not exist!")
+            # Пытаемся создать таблицы
+            try:
+                from .database import init_database
+                logger.info("⚡ Attempting to create missing tables...")
+                init_database()
+                logger.info("✅ Tables created successfully")
+            except Exception as init_error:
+                logger.error(f"❌ Failed to create tables: {init_error}")
+                raise
+        
         # Общее количество каналов
+        logger.info("📈 Querying active channels count...")
         cursor.execute('SELECT COUNT(*) FROM channels WHERE is_active = 1')
         active_channels = cursor.fetchone()[0]
+        logger.info(f"✅ Active channels: {active_channels}")
         
+        logger.info("📈 Querying total channels count...")
         cursor.execute('SELECT COUNT(*) FROM channels')
         total_channels = cursor.fetchone()[0]
+        logger.info(f"✅ Total channels: {total_channels}")
         
         # Статистика за последние 24 часа
         yesterday = datetime.now() - timedelta(hours=24)
@@ -107,21 +137,69 @@ def get_dashboard_stats():
 @app.route('/')
 def dashboard():
     """Главная страница - дашборд"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info("🌐 Dashboard route accessed")
+    
     # Обеспечиваем инициализацию БД при первом доступе
     try:
-        from .database import init_database, test_db
-        if not test_db():
-            print("⚡ Инициализация БД при доступе к dashboard...")
+        logger.info("📦 Attempting to import database modules...")
+        try:
+            from .database import init_database, test_db, DATABASE_PATH
+            logger.info("✅ Database modules imported via relative import")
+        except ImportError as e:
+            logger.warning(f"⚠️ Relative import failed ({e}), trying absolute import...")
+            from database import init_database, test_db, DATABASE_PATH
+            logger.info("✅ Database modules imported via absolute import")
+        
+        logger.info(f"🗄️ Database path: {DATABASE_PATH}")
+        
+        # Проверяем состояние БД
+        logger.info("🔍 Testing database connection...")
+        db_exists = test_db()
+        logger.info(f"📊 Database test result: {db_exists}")
+        
+        if not db_exists:
+            logger.info("⚡ Database not initialized, initializing now...")
             init_database()
-    except ImportError:
-        from database import init_database, test_db
-        if not test_db():
-            print("⚡ Инициализация БД при доступе к dashboard...")
-            init_database()
+            logger.info("✅ Database initialization completed")
+        else:
+            logger.info("✅ Database already initialized")
     
-    stats = get_dashboard_stats()
-    recent_logs = get_run_logs(10)
+    except Exception as e:
+        logger.error(f"❌ Database setup error: {e}")
+        import traceback
+        logger.error(f"📋 Traceback: {traceback.format_exc()}")
+        # Продолжаем выполнение, попробуем получить stats
     
+    # Получаем статистику
+    try:
+        logger.info("📊 Getting dashboard stats...")
+        stats = get_dashboard_stats()
+        logger.info(f"✅ Stats retrieved: {stats}")
+    except Exception as e:
+        logger.error(f"❌ Error getting stats: {e}")
+        # Fallback stats
+        stats = {
+            'active_channels': 0,
+            'total_channels': 0,
+            'successful_runs_24h': 0,
+            'news_published_24h': 0,
+            'messages_collected_24h': 0,
+            'last_run': None
+        }
+    
+    # Получаем логи
+    try:
+        logger.info("📜 Getting recent logs...")
+        recent_logs = get_run_logs(10)
+        logger.info(f"✅ Retrieved {len(recent_logs)} log entries")
+    except Exception as e:
+        logger.error(f"❌ Error getting logs: {e}")
+        recent_logs = []
+    
+    logger.info("🎨 Rendering template...")
     return render_template('dashboard.html', 
                          stats=stats, 
                          recent_logs=recent_logs,

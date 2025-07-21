@@ -15,22 +15,29 @@ ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 # База данных
 # На Railway используем volume для постоянного хранения
 if os.getenv('RAILWAY_ENVIRONMENT'):
+    print("🚄 Railway environment detected")
     # Пробуем создать /data, если не получается - используем /tmp
     try:
+        print("🔍 Attempting to create /data directory...")
         os.makedirs('/data', exist_ok=True)
+        print("✅ /data directory created/exists")
+        
         # Проверяем права на запись
+        print("✍️ Testing write permissions to /data...")
         test_file = '/data/.write_test'
         with open(test_file, 'w') as f:
             f.write('test')
         os.remove(test_file)
         DATABASE_PATH = '/data/edu_digest.db'
-        print("🗄️ Используем /data для постоянного хранения")
+        print(f"🗄️ ✅ Using /data for persistent storage: {DATABASE_PATH}")
     except (PermissionError, OSError) as e:
-        print(f"⚠️ Нет доступа к /data ({e}), используем /tmp")
+        print(f"⚠️ No access to /data ({e}), falling back to /tmp")
         DATABASE_PATH = '/tmp/edu_digest.db'
+        print(f"📁 Using temporary storage: {DATABASE_PATH}")
 else:
     # Локальная разработка
     DATABASE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'edu_digest.db')
+    print(f"🏠 Local development mode: {DATABASE_PATH}")
 
 # Настройки по умолчанию
 DEFAULT_MAX_NEWS_COUNT = 10

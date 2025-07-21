@@ -41,10 +41,14 @@ def create_connection() -> sqlite3.Connection:
 
 def init_database():
     """Инициализация базы данных с созданием всех таблиц"""
+    logger.info("🚀 Starting database initialization...")
+    logger.info(f"📍 Database path: {DATABASE_PATH}")
+    
     conn = create_connection()
     cursor = conn.cursor()
     
     try:
+        logger.info("📊 Creating tables...")
         # Таблица отслеживаемых каналов
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS channels (
