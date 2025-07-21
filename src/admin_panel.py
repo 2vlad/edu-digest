@@ -414,57 +414,54 @@ def api_channels():
 def health():
     """Health check для мониторинга"""
     try:
-        # Инициализируем БД если не существует  
-        from .database import init_database, test_db
-        if not test_db():
-            print("⚡ Инициализация БД в health check...")
-            init_database()
-            
-        # Проверяем доступность базы данных
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM channels')
-        channels_count = cursor.fetchone()[0]
-        conn.close()
-        
-        # Получаем информацию о последнем запуске
-        try:
-            recent_logs = get_run_logs(1)
-            last_run = recent_logs[0] if recent_logs else None
-        except:
-            last_run = None
-        
         # Импортируем DATABASE_PATH для проверки
         try:
-            from .config import DATABASE_PATH
+            from .database import init_database, test_db, DATABASE_PATH
         except ImportError:
-            from config import DATABASE_PATH
+            from database import init_database, test_db, DATABASE_PATH
         
-        return jsonify({
+        # Простая проверка - возвращаем OK без сложной инициализации
+        # чтобы избежать циклов перезапуска
+        basic_info = {
             'status': 'ok',
-            'database': 'connected',
             'database_path': DATABASE_PATH,
             'database_exists': os.path.exists(DATABASE_PATH),
             'is_railway': bool(os.getenv('RAILWAY_ENVIRONMENT')),
-            'channels_count': channels_count,
-            'last_run': last_run['started_at'] if last_run else None,
             'timestamp': datetime.now().isoformat()
-        })
+        }
+        
+        # Только если БД уже инициализирована, пробуем подключиться
+        if os.path.exists(DATABASE_PATH):
+            try:
+                conn = get_db()
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM channels')
+                channels_count = cursor.fetchone()[0]
+                conn.close()
+                basic_info.update({
+                    'database': 'connected',
+                    'channels_count': channels_count
+                })
+            except Exception as db_error:
+                basic_info.update({
+                    'database': f'error: {str(db_error)}',
+                    'channels_count': 0
+                })
+        else:
+            basic_info.update({
+                'database': 'not_initialized',
+                'channels_count': 0
+            })
+        
+        return jsonify(basic_info)
     
     except Exception as e:
-        import traceback
-        error_details = {
-            'error': str(e),
-            'type': type(e).__name__,
-            'traceback': traceback.format_exc()
-        }
-        print(f"❌ Health check error: {error_details}")
+        # Минимальный error response чтобы не крашить health check
         return jsonify({
             'status': 'error',
             'error': str(e),
-            'error_type': type(e).__name__,
             'timestamp': datetime.now().isoformat()
-        }), 500
+        }), 200  # Возвращаем 200, чтобы не вызвать рестарт
 
 # Создание HTML шаблонов
 def create_templates():

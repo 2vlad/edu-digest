@@ -4,6 +4,5 @@ builder = "NIXPACKS"
 [deploy]
 startCommand = "python -m src"
 healthcheckPath = "/health"
-
-[experimental]
-volumes = ["/data"]
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"

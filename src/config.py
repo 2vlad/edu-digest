@@ -13,9 +13,9 @@ TARGET_CHANNEL = os.getenv('TARGET_CHANNEL', '@vestnik_edtech')
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 
 # База данных
-# На Railway используем /data volume для постоянного хранения
+# На Railway используем /tmp временно до настройки volume
 if os.getenv('RAILWAY_ENVIRONMENT'):
-    DATABASE_PATH = '/data/edu_digest.db'
+    DATABASE_PATH = '/tmp/edu_digest.db'
 else:
     # Локальная разработка
     DATABASE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'edu_digest.db')
