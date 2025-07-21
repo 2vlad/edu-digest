@@ -1,3 +1,3 @@
-web: gunicorn --bind 0.0.0.0:$PORT "src.admin_panel:app"
+web: python -m src
 worker: python main.py collect
 scheduler: python scheduler.py

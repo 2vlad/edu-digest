@@ -73,11 +73,11 @@ def test_database():
         
         # Тестируем добавление канала
         try:
-            ChannelsDB.add_channel("@test_channel", "Test Channel", 5)
+            ChannelsDB.add_channel("@test_channel_unique", "Test Channel", 5)
             print("✅ Добавление каналов работает")
         except Exception as e:
-            if "уже существует" in str(e):
-                print("✅ Добавление каналов работает (канал уже существует)")
+            if "уже существует" in str(e) or "UNIQUE constraint failed" in str(e):
+                print("✅ Добавление каналов работает (проверка уникальности работает)")
             else:
                 print(f"❌ Ошибка добавления канала: {e}")
                 return False

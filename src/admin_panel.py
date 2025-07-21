@@ -107,6 +107,18 @@ def get_dashboard_stats():
 @app.route('/')
 def dashboard():
     """Главная страница - дашборд"""
+    # Обеспечиваем инициализацию БД при первом доступе
+    try:
+        from .database import init_database, test_db
+        if not test_db():
+            print("⚡ Инициализация БД при доступе к dashboard...")
+            init_database()
+    except ImportError:
+        from database import init_database, test_db
+        if not test_db():
+            print("⚡ Инициализация БД при доступе к dashboard...")
+            init_database()
+    
     stats = get_dashboard_stats()
     recent_logs = get_run_logs(10)
     
