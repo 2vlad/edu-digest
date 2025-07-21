@@ -24,9 +24,16 @@ logger = logging.getLogger(__name__)
 def create_connection() -> sqlite3.Connection:
     """Создание подключения к базе данных"""
     try:
-        os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
+        # Создаем директорию для базы данных, если она не существует
+        db_dir = os.path.dirname(DATABASE_PATH)
+        if db_dir:  # Проверяем, что путь содержит директорию
+            os.makedirs(db_dir, exist_ok=True)
+        
+        # На Railway с volume директория /data уже существует
         conn = sqlite3.connect(DATABASE_PATH)
         conn.row_factory = sqlite3.Row  # Для доступа к колонкам по имени
+        
+        logger.info(f"🔗 Подключение к базе данных: {DATABASE_PATH}")
         return conn
     except Exception as e:
         logger.error(f"Ошибка подключения к базе данных: {e}")

@@ -434,9 +434,18 @@ def health():
         except:
             last_run = None
         
+        # Импортируем DATABASE_PATH для проверки
+        try:
+            from .config import DATABASE_PATH
+        except ImportError:
+            from config import DATABASE_PATH
+        
         return jsonify({
             'status': 'ok',
             'database': 'connected',
+            'database_path': DATABASE_PATH,
+            'database_exists': os.path.exists(DATABASE_PATH),
+            'is_railway': bool(os.getenv('RAILWAY_ENVIRONMENT')),
             'channels_count': channels_count,
             'last_run': last_run['started_at'] if last_run else None,
             'timestamp': datetime.now().isoformat()

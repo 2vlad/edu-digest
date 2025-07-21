@@ -1,0 +1,9 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "python -m src"
+healthcheckPath = "/health"
+
+[experimental]
+volumes = ["/data"]
