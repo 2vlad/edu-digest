@@ -28,6 +28,78 @@ if USE_SUPABASE:
             supabase_db
         )
         
+        # Создаем безопасные классы с автоматическим fallback
+        class SafeChannelsDB:
+            @staticmethod
+            def add_channel(username: str, display_name: str = None, priority: int = 0) -> int:
+                try:
+                    return SupabaseChannelsDB.add_channel(username, display_name, priority)
+                except Exception as e:
+                    logger.error(f"❌ Supabase add_channel failed: {e}")
+                    logger.info("🔄 Using SQLite fallback for add_channel...")
+                    return _SQLiteChannelsDB.add_channel(username, display_name, priority)
+                    
+            @staticmethod
+            def get_active_channels():
+                try:
+                    return SupabaseChannelsDB.get_active_channels()
+                except Exception as e:
+                    logger.error(f"❌ Supabase get_active_channels failed: {e}")
+                    logger.info("🔄 Using SQLite fallback for get_active_channels...")
+                    return _SQLiteChannelsDB.get_active_channels()
+                    
+            @staticmethod
+            def update_last_message_id(channel_id: int, message_id: int):
+                try:
+                    return SupabaseChannelsDB.update_last_message_id(channel_id, message_id)
+                except Exception as e:
+                    logger.error(f"❌ Supabase update_last_message_id failed: {e}")
+                    logger.info("🔄 Using SQLite fallback for update_last_message_id...")
+                    return _SQLiteChannelsDB.update_last_message_id(channel_id, message_id)
+
+        class SafeSettingsDB:
+            @staticmethod
+            def get_setting(key: str, default: str = None):
+                try:
+                    return SupabaseSettingsDB.get_setting(key, default)
+                except Exception as e:
+                    logger.error(f"❌ Supabase get_setting failed: {e}")
+                    logger.info("🔄 Using SQLite fallback for get_setting...")
+                    return _SQLiteSettingsDB.get_setting(key, default)
+                    
+            @staticmethod
+            def set_setting(key: str, value: str, description: str = None):
+                try:
+                    return SupabaseSettingsDB.set_setting(key, value, description)
+                except Exception as e:
+                    logger.error(f"❌ Supabase set_setting failed: {e}")
+                    logger.info("🔄 Using SQLite fallback for set_setting...")
+                    return _SQLiteSettingsDB.set_setting(key, value, description)
+
+        class SafeProcessedMessagesDB:
+            @staticmethod
+            def is_message_processed(channel_id: int, message_id: int) -> bool:
+                try:
+                    return SupabaseProcessedMessagesDB.is_message_processed(channel_id, message_id)
+                except Exception as e:
+                    logger.error(f"❌ Supabase is_message_processed failed: {e}")
+                    logger.info("🔄 Using SQLite fallback for is_message_processed...")
+                    return _SQLiteProcessedMessagesDB.is_message_processed(channel_id, message_id)
+                    
+            @staticmethod
+            def mark_message_processed(channel_id: int, message_id: int, message_text: str = None, summary: str = None) -> int:
+                try:
+                    return SupabaseProcessedMessagesDB.mark_message_processed(channel_id, message_id, message_text, summary)
+                except Exception as e:
+                    logger.error(f"❌ Supabase mark_message_processed failed: {e}")
+                    logger.info("🔄 Using SQLite fallback for mark_message_processed...")
+                    return _SQLiteProcessedMessagesDB.mark_message_processed(channel_id, message_id, message_text, summary)
+
+        # Используем безопасные классы
+        ChannelsDB = SafeChannelsDB
+        SettingsDB = SafeSettingsDB
+        ProcessedMessagesDB = SafeProcessedMessagesDB
+
         def create_connection():
             """Получение подключения для Supabase с автоматическим fallback"""
             try:
@@ -38,8 +110,6 @@ if USE_SUPABASE:
             except Exception as e:
                 logger.error(f"❌ Supabase connection failed: {e}")
                 logger.info("🔄 Switching to SQLite fallback...")
-                # Переключаемся на SQLite
-                _switch_to_sqlite_fallback()
                 return _sqlite_create_connection()
         
         def init_database():
@@ -49,7 +119,6 @@ if USE_SUPABASE:
             except Exception as e:
                 logger.error(f"❌ Supabase database init failed: {e}")
                 logger.info("🔄 Switching to SQLite fallback...")
-                _switch_to_sqlite_fallback()
                 return _sqlite_init_database()
         
         def test_db():
@@ -59,7 +128,6 @@ if USE_SUPABASE:
             except Exception as e:
                 logger.error(f"❌ Supabase test failed: {e}")
                 logger.info("🔄 Switching to SQLite fallback...")
-                _switch_to_sqlite_fallback()
                 return _sqlite_test_db()
                 
     except ImportError as e:
@@ -92,13 +160,30 @@ except ImportError:
 def _switch_to_sqlite_fallback():
     """Переключение на SQLite fallback во время выполнения"""
     global USE_SUPABASE, ChannelsDB, SettingsDB, ProcessedMessagesDB, init_database, test_db, create_connection
+    
+    # Обновляем глобальное состояние
+    import sys
+    current_module = sys.modules[__name__]
+    
     USE_SUPABASE = False
+    current_module.USE_SUPABASE = False
+    
+    # Переключаем все классы и функции
     ChannelsDB = _SQLiteChannelsDB
     SettingsDB = _SQLiteSettingsDB 
     ProcessedMessagesDB = _SQLiteProcessedMessagesDB
     init_database = _sqlite_init_database
     test_db = _sqlite_test_db
     create_connection = _sqlite_create_connection
+    
+    # Обновляем в модуле
+    current_module.ChannelsDB = _SQLiteChannelsDB
+    current_module.SettingsDB = _SQLiteSettingsDB
+    current_module.ProcessedMessagesDB = _SQLiteProcessedMessagesDB
+    current_module.init_database = _sqlite_init_database
+    current_module.test_db = _sqlite_test_db
+    current_module.create_connection = _sqlite_create_connection
+    
     logger.info("✅ Switched to SQLite fallback")
 
 if not USE_SUPABASE:

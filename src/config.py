@@ -29,32 +29,37 @@ def validate_supabase_config():
         return False
     return True
 
+# Функция для генерации SQLite пути (используется и для fallback)
+def get_sqlite_path():
+    """Определяет путь к SQLite базе данных для fallback"""
+    if os.getenv('RAILWAY_ENVIRONMENT'):
+        try:
+            os.makedirs('/data', exist_ok=True)
+            # Проверяем права на запись
+            test_file = '/data/.write_test'
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+            return '/data/edu_digest.db'
+        except (PermissionError, OSError):
+            return '/tmp/edu_digest.db'
+    else:
+        # Локальная разработка
+        return os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'edu_digest.db')
+
+# Определяем DATABASE_PATH - всегда должен быть доступен для fallback
+DATABASE_PATH = get_sqlite_path()
+
 # Поддержка старого SQLite для локальной разработки (fallback)
 if not validate_supabase_config() or (not DATABASE_URL and not SUPABASE_URL):
     if not validate_supabase_config():
         print("⚠️ Неправильная конфигурация Supabase, используем SQLite fallback")
     else:
         print("⚠️ Supabase не настроен, используем SQLite fallback")
-    if os.getenv('RAILWAY_ENVIRONMENT'):
-        print("🚄 Railway environment detected")
-        try:
-            print("🔍 Attempting to create /data directory...")
-            os.makedirs('/data', exist_ok=True)
-            test_file = '/data/.write_test'
-            with open(test_file, 'w') as f:
-                f.write('test')
-            os.remove(test_file)
-            DATABASE_PATH = '/data/edu_digest.db'
-            print(f"🗄️ Using SQLite at: {DATABASE_PATH}")
-        except (PermissionError, OSError) as e:
-            DATABASE_PATH = '/tmp/edu_digest.db'
-            print(f"📁 Using temporary SQLite: {DATABASE_PATH}")
-    else:
-        DATABASE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'edu_digest.db')
-        print(f"🏠 Local SQLite: {DATABASE_PATH}")
+    print(f"📁 SQLite path: {DATABASE_PATH}")
 else:
     print(f"🐘 Using PostgreSQL: {SUPABASE_URL or 'Direct connection'}")
-    DATABASE_PATH = None  # Не используем SQLite
+    print(f"🔄 SQLite fallback available at: {DATABASE_PATH}")
 
 # Настройки по умолчанию
 DEFAULT_MAX_NEWS_COUNT = 10
