@@ -337,26 +337,62 @@ def logs():
 @app.route('/run-collect', methods=['POST'])
 def run_collect():
     """Запуск сбора новостей из админки"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
+        logger.info("🚀 Начинаем запуск сбора новостей из админки...")
+        
+        # Проверяем наличие необходимых переменных окружения
+        required_env_vars = ['TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'TELEGRAM_BOT_TOKEN', 'ANTHROPIC_API_KEY']
+        missing_vars = []
+        
+        for var in required_env_vars:
+            if not os.getenv(var):
+                missing_vars.append(var)
+        
+        if missing_vars:
+            error_msg = f'Отсутствуют переменные окружения: {", ".join(missing_vars)}'
+            logger.error(error_msg)
+            flash(error_msg, 'error')
+            return redirect(url_for('dashboard'))
+        
+        logger.info("✅ Все переменные окружения найдены")
+        
         import asyncio
         try:
             from .news_collector import NewsCollector
+            logger.info("✅ NewsCollector импортирован через относительный импорт")
         except ImportError:
             from news_collector import NewsCollector
+            logger.info("✅ NewsCollector импортирован через абсолютный импорт")
+        
+        logger.info("🔄 Создаем NewsCollector и запускаем полный цикл...")
         
         # Создаем новый цикл событий для async функции
         collector = NewsCollector()
         result = asyncio.run(collector.run_full_cycle())
         
-        if result['success']:
-            flash(f'Сбор новостей завершен успешно! '
-                  f'Обработано: {result["channels_processed"]} каналов, '
-                  f'опубликовано: {result["news_published"]} новостей', 'success')
+        logger.info(f"📊 Результат выполнения: {result}")
+        
+        if result.get('success'):
+            success_msg = (f'Сбор новостей завершен успешно! '
+                          f'Обработано: {result.get("channels_processed", 0)} каналов, '
+                          f'опубликовано: {result.get("news_published", 0)} новостей')
+            logger.info(f"✅ {success_msg}")
+            flash(success_msg, 'success')
         else:
-            flash(f'Ошибка сбора новостей: {result.get("error", "Unknown")}', 'error')
+            error_msg = f'Ошибка сбора новостей: {result.get("error", "Неизвестная ошибка")}'
+            logger.error(f"❌ {error_msg}")
+            flash(error_msg, 'error')
     
     except Exception as e:
-        flash(f'Ошибка запуска сбора: {str(e)}', 'error')
+        import traceback
+        error_details = traceback.format_exc()
+        error_msg = f'Ошибка запуска сбора: {str(e)}'
+        logger.error(f"❌ {error_msg}")
+        logger.error(f"📋 Полная трассировка:\n{error_details}")
+        flash(error_msg, 'error')
     
     return redirect(url_for('dashboard'))
 
