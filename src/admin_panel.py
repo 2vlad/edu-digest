@@ -15,20 +15,24 @@ sys.path.append(os.path.dirname(__file__))
 
 try:
     # Попытка относительного импорта (при запуске через main.py)
-    from .database import (ChannelsDB, ProcessedMessagesDB, SettingsDB, 
-                          create_connection, DATABASE_PATH)
+    from .db_adapter import (ChannelsDB, ProcessedMessagesDB, SettingsDB, 
+                            create_connection, USE_SUPABASE, get_database_info)
     from .config import FLASK_SECRET_KEY, FLASK_PORT
 except ImportError:
     # Абсолютный импорт (при прямом запуске)
-    from database import (ChannelsDB, ProcessedMessagesDB, SettingsDB, 
-                         create_connection, DATABASE_PATH)
+    from db_adapter import (ChannelsDB, ProcessedMessagesDB, SettingsDB, 
+                           create_connection, USE_SUPABASE, get_database_info)
     from config import FLASK_SECRET_KEY, FLASK_PORT
 
 # Инициализация Flask приложения
 template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates')
 app = Flask(__name__, template_folder=template_dir)
 app.secret_key = FLASK_SECRET_KEY
-app.config['DATABASE'] = DATABASE_PATH
+
+# Конфигурация базы данных
+db_info = get_database_info()
+app.config['DATABASE_INFO'] = db_info
+print(f"🗄️ Database configuration: {db_info['type']}")
 
 # Функции для работы с данными
 def get_db():
@@ -144,17 +148,18 @@ def dashboard():
     
     # Обеспечиваем инициализацию БД при первом доступе
     try:
-        logger.info("📦 Attempting to import database modules...")
+        logger.info("📦 Setting up database connection...")
+        
+        # Импортируем необходимые функции из адаптера
         try:
-            from .database import init_database, test_db, DATABASE_PATH
-            logger.info("✅ Database modules imported via relative import")
-        except ImportError as e:
-            logger.warning(f"⚠️ Relative import failed ({e}), trying absolute import...")
-            from database import init_database, test_db, DATABASE_PATH
-            logger.info("✅ Database modules imported via absolute import")
+            from .db_adapter import init_database, test_db
+            logger.info("✅ Database adapter imported via relative import")
+        except ImportError:
+            from db_adapter import init_database, test_db
+            logger.info("✅ Database adapter imported via absolute import")
         
-        logger.info(f"🗄️ Database path: {DATABASE_PATH}")
-        
+        logger.info(f"🗄️ Database type: {db_info['type']}")
+            
         # Проверяем состояние БД
         logger.info("🔍 Testing database connection...")
         db_exists = test_db()
@@ -428,7 +433,14 @@ def logs():
 def run_collect():
     """Запуск сбора новостей из админки"""
     import logging
+    import asyncio
+    import signal
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+    
     logger = logging.getLogger(__name__)
+    
+    def timeout_handler(signum, frame):
+        raise TimeoutError("Operation timed out")
     
     try:
         logger.info("🚀 Начинаем запуск сбора новостей из админки...")
@@ -449,7 +461,6 @@ def run_collect():
         
         logger.info("✅ Все переменные окружения найдены")
         
-        import asyncio
         try:
             from .news_collector import NewsCollector
             logger.info("✅ NewsCollector импортирован через относительный импорт")
@@ -459,11 +470,37 @@ def run_collect():
         
         logger.info("🔄 Создаем NewsCollector и запускаем полный цикл...")
         
-        # Создаем новый цикл событий для async функции
-        collector = NewsCollector()
-        result = asyncio.run(collector.run_full_cycle())
+        # Создаем функцию для выполнения в отдельном потоке
+        def run_news_collection():
+            try:
+                collector = NewsCollector()
+                # Создаем новый цикл событий для этого потока
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(collector.run_full_cycle())
+                    return result
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.error(f"❌ Ошибка в run_news_collection: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                return {"success": False, "error": str(e)}
         
-        logger.info(f"📊 Результат выполнения: {result}")
+        # Запускаем с таймаутом 5 минут
+        logger.info("⏳ Запускаем сбор новостей с таймаутом 5 минут...")
+        
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_news_collection)
+            try:
+                result = future.result(timeout=300)  # 5 минут
+                logger.info(f"📊 Результат выполнения: {result}")
+            except FuturesTimeoutError:
+                logger.error("❌ Таймаут: сбор новостей занял более 5 минут")
+                future.cancel()
+                flash('Таймаут: сбор новостей занял слишком много времени. Попробуйте позже.', 'error')
+                return redirect(url_for('dashboard'))
         
         if result.get('success'):
             success_msg = (f'Сбор новостей завершен успешно! '
@@ -504,42 +541,43 @@ def api_channels():
 def health():
     """Health check для мониторинга"""
     try:
-        # Импортируем DATABASE_PATH для проверки
-        try:
-            from .database import init_database, test_db, DATABASE_PATH
-        except ImportError:
-            from database import init_database, test_db, DATABASE_PATH
+        # Получаем информацию о базе данных
+        db_info = get_database_info()
         
         # Простая проверка - возвращаем OK без сложной инициализации
-        # чтобы избежать циклов перезапуска
         basic_info = {
             'status': 'ok',
-            'database_path': DATABASE_PATH,
-            'database_exists': os.path.exists(DATABASE_PATH),
+            'database_type': db_info['type'],
+            'database_persistent': db_info.get('persistent', False),
+            'railway_compatible': db_info.get('railway_compatible', False),
             'is_railway': bool(os.getenv('RAILWAY_ENVIRONMENT')),
             'timestamp': datetime.now().isoformat()
         }
         
-        # Только если БД уже инициализирована, пробуем подключиться
-        if os.path.exists(DATABASE_PATH):
-            try:
-                conn = get_db()
+        # Пробуем подключиться к БД для проверки
+        try:
+            conn = get_db()
+            if USE_SUPABASE:
+                # PostgreSQL проверка
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM channels')
+                result = cursor.fetchone()
+                channels_count = result['count'] if isinstance(result, dict) else result[0]
+            else:
+                # SQLite проверка
                 cursor = conn.cursor()
                 cursor.execute('SELECT COUNT(*) FROM channels')
                 channels_count = cursor.fetchone()[0]
                 conn.close()
-                basic_info.update({
-                    'database': 'connected',
-                    'channels_count': channels_count
-                })
-            except Exception as db_error:
-                basic_info.update({
-                    'database': f'error: {str(db_error)}',
-                    'channels_count': 0
-                })
-        else:
+            
             basic_info.update({
-                'database': 'not_initialized',
+                'database': 'connected',
+                'channels_count': channels_count
+            })
+            
+        except Exception as db_error:
+            basic_info.update({
+                'database': f'error: {str(db_error)}',
                 'channels_count': 0
             })
         

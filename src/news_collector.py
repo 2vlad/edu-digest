@@ -10,10 +10,14 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 
 # Импорты внутренних модулей
-from .database import (ChannelsDB, ProcessedMessagesDB, SettingsDB, 
-                      create_connection, sqlite3)
-from .claude_summarizer import get_claude_summarizer
-from .telegram_bot import get_telegram_bot, TelegramChannelReader
+try:
+    from .db_adapter import (ChannelsDB, ProcessedMessagesDB, SettingsDB, create_connection)
+    from .claude_summarizer import get_claude_summarizer
+    from .telegram_bot import get_telegram_bot, TelegramChannelReader
+except ImportError:
+    from db_adapter import (ChannelsDB, ProcessedMessagesDB, SettingsDB, create_connection)
+    from claude_summarizer import get_claude_summarizer
+    from telegram_bot import get_telegram_bot, TelegramChannelReader
 
 # Настройка логирования
 import os

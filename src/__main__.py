@@ -4,7 +4,7 @@
 """
 
 from .admin_panel import app, FLASK_PORT, create_templates
-from .database import init_database, test_db
+from .db_adapter import init_database, test_db, get_database_info
 
 if __name__ == '__main__':
     import logging
@@ -19,6 +19,11 @@ if __name__ == '__main__':
     
     logger = logging.getLogger(__name__)
     logger.info("🚀 Starting Flask application...")
+    
+    # Показываем информацию о базе данных
+    db_info = get_database_info()
+    logger.info(f"🗄️ Database: {db_info}")
+    print(f"🗄️ Database: {db_info['type']}")
     
     # Инициализируем базу данных при первом запуске
     logger.info("🔧 Initializing database...")

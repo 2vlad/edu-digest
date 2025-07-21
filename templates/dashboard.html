@@ -4,8 +4,8 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1><i class="fas fa-tachometer-alt"></i> Дашборд</h1>
     <div>
-        <form method="POST" action="/run-collect" class="d-inline">
-            <button type="submit" class="btn btn-primary" onclick="this.disabled=true; this.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> Запуск...';">
+        <form method="POST" action="/run-collect" class="d-inline" id="collect-form">
+            <button type="submit" class="btn btn-primary" id="collect-btn">
                 <i class="fas fa-play"></i> Запустить сбор новостей
             </button>
         </form>
@@ -200,5 +200,42 @@ setInterval(function() {
         })
         .catch(error => console.log('Ошибка обновления статистики:', error));
 }, 30000);
+
+// Обработка формы сбора новостей
+document.addEventListener('DOMContentLoaded', function() {
+    const collectForm = document.getElementById('collect-form');
+    const collectBtn = document.getElementById('collect-btn');
+    
+    if (collectForm && collectBtn) {
+        collectForm.addEventListener('submit', function(e) {
+            // Показываем спиннер и отключаем кнопку
+            const originalHTML = collectBtn.innerHTML;
+            collectBtn.disabled = true;
+            collectBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Запуск...';
+            
+            // Устанавливаем таймер на 6 минут для восстановления кнопки
+            const timeoutId = setTimeout(function() {
+                collectBtn.disabled = false;
+                collectBtn.innerHTML = originalHTML;
+                // Показываем предупреждение о долгом выполнении
+                const existingAlert = document.querySelector('.timeout-alert');
+                if (!existingAlert) {
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = 'alert alert-warning alert-dismissible fade show timeout-alert';
+                    alertDiv.innerHTML = `
+                        Операция занимает больше обычного. Проверьте логи или попробуйте позже.
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    `;
+                    document.querySelector('.container').insertBefore(alertDiv, document.querySelector('.container').firstChild);
+                }
+            }, 360000); // 6 минут
+            
+            // При переходе на другую страницу очищаем таймер
+            window.addEventListener('beforeunload', function() {
+                clearTimeout(timeoutId);
+            });
+        });
+    }
+});
 </script>
 {% endblock %}
