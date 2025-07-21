@@ -375,6 +375,12 @@ def api_channels():
 def health():
     """Health check для мониторинга"""
     try:
+        # Инициализируем БД если не существует  
+        from .database import init_database, test_db
+        if not test_db():
+            print("⚡ Инициализация БД в health check...")
+            init_database()
+            
         # Проверяем доступность базы данных
         conn = get_db()
         cursor = conn.cursor()
@@ -383,8 +389,11 @@ def health():
         conn.close()
         
         # Получаем информацию о последнем запуске
-        recent_logs = get_run_logs(1)
-        last_run = recent_logs[0] if recent_logs else None
+        try:
+            recent_logs = get_run_logs(1)
+            last_run = recent_logs[0] if recent_logs else None
+        except:
+            last_run = None
         
         return jsonify({
             'status': 'ok',
@@ -395,9 +404,17 @@ def health():
         })
     
     except Exception as e:
+        import traceback
+        error_details = {
+            'error': str(e),
+            'type': type(e).__name__,
+            'traceback': traceback.format_exc()
+        }
+        print(f"❌ Health check error: {error_details}")
         return jsonify({
             'status': 'error',
             'error': str(e),
+            'error_type': type(e).__name__,
             'timestamp': datetime.now().isoformat()
         }), 500
 

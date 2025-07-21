@@ -7,7 +7,7 @@ load_dotenv()
 TELEGRAM_API_ID = os.getenv('TELEGRAM_API_ID')
 TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TARGET_CHANNEL = os.getenv('TARGET_CHANNEL', '@vestnikedtech')
+TARGET_CHANNEL = os.getenv('TARGET_CHANNEL', '@vestnik_edtech')
 
 # Claude API настройки
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
