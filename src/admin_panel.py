@@ -61,6 +61,7 @@ def get_dashboard_stats():
     
     logger.info("📊 Getting dashboard statistics...")
     
+    conn = None
     try:
         logger.info("🔗 Getting database connection...")
         conn = get_db()
@@ -69,15 +70,26 @@ def get_dashboard_stats():
         
         # Проверяем существование таблиц
         logger.info("🔍 Checking if tables exist...")
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [row[0] for row in cursor.fetchall()]
+        
+        if USE_SUPABASE:
+            # PostgreSQL запрос
+            cursor.execute("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+            """)
+            tables = [row['table_name'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+        else:
+            # SQLite запрос
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            
         logger.info(f"📋 Available tables: {tables}")
         
         if 'channels' not in tables:
             logger.error("❌ Table 'channels' does not exist!")
             # Пытаемся создать таблицы
             try:
-                from .database import init_database
+                from .db_adapter import init_database
                 logger.info("⚡ Attempting to create missing tables...")
                 init_database()
                 logger.info("✅ Tables created successfully")
@@ -87,34 +99,63 @@ def get_dashboard_stats():
         
         # Общее количество каналов
         logger.info("📈 Querying active channels count...")
-        cursor.execute('SELECT COUNT(*) FROM channels WHERE is_active = 1')
-        active_channels = cursor.fetchone()[0]
+        if USE_SUPABASE:
+            cursor.execute('SELECT COUNT(*) FROM channels WHERE is_active = true')
+            active_channels = cursor.fetchone()['count']
+            
+            cursor.execute('SELECT COUNT(*) FROM channels')
+            total_channels = cursor.fetchone()['count']
+        else:
+            cursor.execute('SELECT COUNT(*) FROM channels WHERE is_active = 1')
+            active_channels = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM channels')
+            total_channels = cursor.fetchone()[0]
+            
         logger.info(f"✅ Active channels: {active_channels}")
-        
-        logger.info("📈 Querying total channels count...")
-        cursor.execute('SELECT COUNT(*) FROM channels')
-        total_channels = cursor.fetchone()[0]
         logger.info(f"✅ Total channels: {total_channels}")
         
         # Статистика за последние 24 часа
         yesterday = datetime.now() - timedelta(hours=24)
-        cursor.execute('''
-            SELECT COUNT(*) FROM run_logs 
-            WHERE started_at > ? AND status = 'completed'
-        ''', (yesterday.isoformat(),))
-        successful_runs = cursor.fetchone()[0]
         
-        cursor.execute('''
-            SELECT SUM(news_published) FROM run_logs 
-            WHERE started_at > ? AND status = 'completed'
-        ''', (yesterday.isoformat(),))
-        news_published_24h = cursor.fetchone()[0] or 0
-        
-        cursor.execute('''
-            SELECT SUM(messages_collected) FROM run_logs 
-            WHERE started_at > ? AND status = 'completed'
-        ''', (yesterday.isoformat(),))
-        messages_collected_24h = cursor.fetchone()[0] or 0
+        if USE_SUPABASE:
+            cursor.execute('''
+                SELECT COUNT(*) FROM run_logs 
+                WHERE started_at > %s AND status = 'completed'
+            ''', (yesterday.isoformat(),))
+            successful_runs = cursor.fetchone()['count']
+            
+            cursor.execute('''
+                SELECT SUM(news_published) FROM run_logs 
+                WHERE started_at > %s AND status = 'completed'
+            ''', (yesterday.isoformat(),))
+            result = cursor.fetchone()
+            news_published_24h = result['sum'] if result and result['sum'] else 0
+            
+            cursor.execute('''
+                SELECT SUM(messages_collected) FROM run_logs 
+                WHERE started_at > %s AND status = 'completed'
+            ''', (yesterday.isoformat(),))
+            result = cursor.fetchone()
+            messages_collected_24h = result['sum'] if result and result['sum'] else 0
+        else:
+            cursor.execute('''
+                SELECT COUNT(*) FROM run_logs 
+                WHERE started_at > ? AND status = 'completed'
+            ''', (yesterday.isoformat(),))
+            successful_runs = cursor.fetchone()[0]
+            
+            cursor.execute('''
+                SELECT SUM(news_published) FROM run_logs 
+                WHERE started_at > ? AND status = 'completed'
+            ''', (yesterday.isoformat(),))
+            news_published_24h = cursor.fetchone()[0] or 0
+            
+            cursor.execute('''
+                SELECT SUM(messages_collected) FROM run_logs 
+                WHERE started_at > ? AND status = 'completed'
+            ''', (yesterday.isoformat(),))
+            messages_collected_24h = cursor.fetchone()[0] or 0
         
         # Последний запуск
         cursor.execute('''
@@ -134,7 +175,8 @@ def get_dashboard_stats():
             'last_run': last_run
         }
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # Маршруты (Routes)
 

@@ -57,17 +57,30 @@ class SupabaseDB:
             
             # Подключение через Supabase client
             if SUPABASE_URL and SUPABASE_KEY:
-                self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-                logger.info("✅ Supabase client инициализирован")
+                try:
+                    self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    logger.info("✅ Supabase client инициализирован")
+                except Exception as client_error:
+                    logger.warning(f"⚠️ Не удалось создать Supabase client: {client_error}")
+                    logger.info("💡 Продолжаем с прямым подключением к PostgreSQL")
             
             # Прямое подключение к PostgreSQL для некоторых операций
             if DATABASE_URL:
-                self.pg_connection = psycopg2.connect(
-                    DATABASE_URL,
-                    cursor_factory=RealDictCursor
-                )
-                self.pg_connection.autocommit = True
-                logger.info("✅ PostgreSQL подключение установлено")
+                try:
+                    self.pg_connection = psycopg2.connect(
+                        DATABASE_URL,
+                        cursor_factory=RealDictCursor,
+                        connect_timeout=10,  # 10 секунд таймаут
+                        application_name="edu_digest_bot"
+                    )
+                    self.pg_connection.autocommit = True
+                    logger.info("✅ PostgreSQL подключение установлено")
+                except psycopg2.OperationalError as pg_error:
+                    logger.error(f"❌ Не удалось подключиться к PostgreSQL: {pg_error}")
+                    if "Network is unreachable" in str(pg_error):
+                        logger.error("🌐 Сетевая проблема - возможно Railway не может достучаться до Supabase")
+                        logger.error("💡 Проверьте настройки Supabase и DATABASE_URL")
+                    raise
             
             self.initialized = True
             return True
