@@ -140,32 +140,52 @@ class NewsCollector:
                 try:
                     logger.info(f"🔍 Обрабатываем канал {channel['username']} (приоритет: {channel['priority']})")
                     
-                    # Для демонстрации используем симуляцию данных
-                    # Пытаемся получить реальные сообщения через Telethon
+                    # PRODUCTION MODE: ТОЛЬКО РЕАЛЬНЫЕ ДАННЫЕ!
+                    # Получаем реальные сообщения через Telethon - БЕЗ FALLBACK НА ТЕСТЫ
                     try:
+                        logger.info(f"📡 Попытка получения РЕАЛЬНЫХ данных из {channel['username']}")
                         from .telegram_reader import get_telegram_reader
                         real_reader = await get_telegram_reader()
-                        if real_reader and real_reader.initialized:
-                            messages = await real_reader.get_channel_messages(
-                                channel['username'], 
-                                limit=10, 
-                                hours_lookback=self.hours_lookback
-                            )
-                            logger.info(f"📡 Используем реальные данные из {channel['username']}")
-                        else:
-                            # Fallback на симуляцию
-                            messages = await self.channel_reader.simulate_channel_messages(
-                                channel['username'], 
-                                count=5
-                            )
-                            logger.info(f"🧪 Используем тестовые данные для {channel['username']}")
-                    except ImportError:
-                        # Fallback на симуляцию если telegram_reader недоступен
-                        messages = await self.channel_reader.simulate_channel_messages(
+                        
+                        if not real_reader:
+                            error_msg = f"❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось инициализировать Telegram reader для {channel['username']}"
+                            logger.error(error_msg)
+                            logger.error("💡 Проверьте переменные окружения: TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN")
+                            # НЕ ИСПОЛЬЗУЕМ ТЕСТОВЫЕ ДАННЫЕ - пропускаем канал!
+                            continue
+                            
+                        if not real_reader.initialized:
+                            error_msg = f"❌ КРИТИЧЕСКАЯ ОШИБКА: Telegram reader не инициализирован для {channel['username']}"
+                            logger.error(error_msg)
+                            logger.error("💡 Проверьте подключение к Telegram API и валидность токенов")
+                            # НЕ ИСПОЛЬЗУЕМ ТЕСТОВЫЕ ДАННЫЕ - пропускаем канал!
+                            continue
+                            
+                        messages = await real_reader.get_channel_messages(
                             channel['username'], 
-                            count=5
+                            limit=10, 
+                            hours_lookback=self.hours_lookback
                         )
-                        logger.info(f"🧪 Используем тестовые данные для {channel['username']} (fallback)")
+                        
+                        if not messages:
+                            logger.warning(f"⚠️ Нет новых сообщений в канале {channel['username']} за последние {self.hours_lookback} часов")
+                            continue
+                            
+                        logger.info(f"✅ Получено {len(messages)} РЕАЛЬНЫХ сообщений из {channel['username']}")
+                        
+                    except ImportError as import_error:
+                        error_msg = f"❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось импортировать telegram_reader: {import_error}"
+                        logger.error(error_msg)
+                        logger.error("💡 Проверьте установку Telethon и конфигурацию модуля")
+                        # НЕ ИСПОЛЬЗУЕМ ТЕСТОВЫЕ ДАННЫЕ - пропускаем канал!
+                        continue
+                        
+                    except Exception as telegram_error:
+                        error_msg = f"❌ КРИТИЧЕСКАЯ ОШИБКА подключения к Telegram для {channel['username']}: {telegram_error}"
+                        logger.error(error_msg)
+                        logger.error("💡 Проверьте сетевое подключение и настройки Telegram API")
+                        # НЕ ИСПОЛЬЗУЕМ ТЕСТОВЫЕ ДАННЫЕ - пропускаем канал!
+                        continue
                     
                     # Фильтруем новые сообщения
                     new_messages = []

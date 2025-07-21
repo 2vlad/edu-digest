@@ -15,12 +15,12 @@ try:
 except ImportError:
     from config import TELEGRAM_API_ID, TELEGRAM_API_HASH
 
-# Настройка логирования
+# Настройка детального логирования
 import os
 os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.DEBUG,  # Максимальный уровень детализации
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('logs/telegram_reader.log'),
         logging.StreamHandler()
@@ -28,6 +28,7 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+logger.info("🚀 Telegram Reader Module - REAL DATA ONLY MODE")
 
 class TelegramChannelReader:
     """Класс для чтения реальных Telegram каналов"""
@@ -39,11 +40,21 @@ class TelegramChannelReader:
     async def initialize(self) -> bool:
         """Инициализация Telethon клиента"""
         try:
+            logger.info("🔧 Initializing Telegram client...")
+            logger.debug(f"🔍 Environment check:")
+            logger.debug(f"   TELEGRAM_API_ID: {'✅ Set' if TELEGRAM_API_ID else '❌ Missing'}")
+            logger.debug(f"   TELEGRAM_API_HASH: {'✅ Set' if TELEGRAM_API_HASH else '❌ Missing'}")
+            
             if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
-                logger.error("❌ Отсутствуют TELEGRAM_API_ID или TELEGRAM_API_HASH")
+                logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА: Отсутствуют TELEGRAM_API_ID или TELEGRAM_API_HASH")
+                logger.error("💡 Добавьте эти переменные в Railway Environment Variables:")
+                logger.error("   TELEGRAM_API_ID=your_api_id")
+                logger.error("   TELEGRAM_API_HASH=your_api_hash")
+                logger.error("🔗 Получить можно на https://my.telegram.org/auth")
                 return False
             
             # Создаем клиент
+            logger.info("🔗 Creating Telethon client...")
             self.client = TelegramClient(
                 'edu_digest_bot', 
                 int(TELEGRAM_API_ID), 
@@ -51,20 +62,36 @@ class TelegramChannelReader:
             )
             
             # Подключаемся
+            logger.info("🔗 Starting Telethon client connection...")
             await self.client.start()
+            logger.info("✅ Telethon client connection established")
             
             # Проверяем авторизацию
+            logger.info("👤 Checking authorization...")
             me = await self.client.get_me()
             if me:
-                logger.info(f"✅ Telethon клиент инициализирован: {me.first_name}")
+                logger.info(f"✅ Telethon client authorized successfully")
+                logger.info(f"👤 User: {me.first_name} {me.last_name or ''} (@{me.username or 'no_username'})")
+                logger.info(f"🆔 User ID: {me.id}")
                 self.initialized = True
                 return True
             else:
-                logger.error("❌ Не удалось авторизоваться")
+                logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось авторизоваться в Telegram")
+                logger.error("💡 Возможные причины:")
+                logger.error("   - Неверные TELEGRAM_API_ID или TELEGRAM_API_HASH")
+                logger.error("   - Аккаунт заблокирован или ограничен")
+                logger.error("   - Проблемы с сетевым подключением к Telegram API")
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ Ошибка инициализации Telethon: {e}")
+            logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА инициализации Telethon: {e}")
+            logger.error(f"🔍 Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"📋 Full traceback: {traceback.format_exc()}")
+            if "api_id" in str(e) or "api_hash" in str(e):
+                logger.error("💡 Проблема с API credentials - проверьте TELEGRAM_API_ID и TELEGRAM_API_HASH")
+            elif "network" in str(e).lower() or "connection" in str(e).lower():
+                logger.error("💡 Проблема с сетевым подключением к Telegram API")
             return False
     
     async def get_channel_messages(self, channel_username: str, limit: int = 10, hours_lookback: int = 12) -> List[Dict]:

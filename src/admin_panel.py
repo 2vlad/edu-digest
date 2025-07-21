@@ -2,36 +2,64 @@
 """
 Task 6: Flask админ-панель для управления каналами
 Веб-интерфейс для управления EdTech News Digest Bot
+СТРОГО ТОЛЬКО SUPABASE MODE!
 """
 
 import os
 import sys
+import logging
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
-import sqlite3
+
+# Настройка детального логирования
+os.makedirs('logs', exist_ok=True)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/admin_panel.log'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+logger.info("🚀 Starting Admin Panel - SUPABASE ONLY MODE")
 
 # Добавляем путь к модулям
 sys.path.append(os.path.dirname(__file__))
 
 try:
     # Попытка относительного импорта (при запуске через main.py)
+    logger.info("📦 Attempting relative import...")
     from .db_adapter import (ChannelsDB, ProcessedMessagesDB, SettingsDB, 
-                            create_connection, USE_SUPABASE, get_database_info)
+                            create_connection, get_database_info)
     from .config import FLASK_SECRET_KEY, FLASK_PORT
-except ImportError:
+    logger.info("✅ Relative import successful")
+except ImportError as e:
     # Абсолютный импорт (при прямом запуске)
-    from db_adapter import (ChannelsDB, ProcessedMessagesDB, SettingsDB, 
-                           create_connection, USE_SUPABASE, get_database_info)
-    from config import FLASK_SECRET_KEY, FLASK_PORT
+    logger.info(f"🔄 Relative import failed: {e}, trying absolute import...")
+    try:
+        from db_adapter import (ChannelsDB, ProcessedMessagesDB, SettingsDB, 
+                               create_connection, get_database_info)
+        from config import FLASK_SECRET_KEY, FLASK_PORT
+        logger.info("✅ Absolute import successful")
+    except ImportError as abs_error:
+        logger.error(f"❌ Both imports failed: relative={e}, absolute={abs_error}")
+        raise
 
 # Инициализация Flask приложения
+logger.info("🌐 Initializing Flask application...")
 template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates')
+logger.info(f"📁 Template directory: {template_dir}")
 app = Flask(__name__, template_folder=template_dir)
 app.secret_key = FLASK_SECRET_KEY
+logger.info("✅ Flask app initialized")
 
 # Конфигурация базы данных
+logger.info("🔍 Getting database information...")
 db_info = get_database_info()
 app.config['DATABASE_INFO'] = db_info
+logger.info(f"🗄️ Database configuration: {db_info}")
 print(f"🗄️ Database configuration: {db_info['type']}")
 
 # Функции для работы с данными
