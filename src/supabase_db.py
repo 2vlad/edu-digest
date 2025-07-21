@@ -58,8 +58,16 @@ class SupabaseDB:
             # Подключение через Supabase client
             if SUPABASE_URL and SUPABASE_KEY:
                 try:
+                    # Создаем client с минимальными параметрами
                     self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
                     logger.info("✅ Supabase client инициализирован")
+                except TypeError as client_error:
+                    if "proxy" in str(client_error):
+                        logger.warning(f"⚠️ Версия supabase-py не поддерживает proxy: {client_error}")
+                        logger.info("💡 Обновите supabase до версии 2.3.4 или используем прямое подключение")
+                    else:
+                        logger.warning(f"⚠️ Ошибка создания Supabase client: {client_error}")
+                    logger.info("💡 Продолжаем с прямым подключением к PostgreSQL")
                 except Exception as client_error:
                     logger.warning(f"⚠️ Не удалось создать Supabase client: {client_error}")
                     logger.info("💡 Продолжаем с прямым подключением к PostgreSQL")
