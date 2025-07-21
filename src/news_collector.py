@@ -137,11 +137,31 @@ class NewsCollector:
                     logger.info(f"🔍 Обрабатываем канал {channel['username']} (приоритет: {channel['priority']})")
                     
                     # Для демонстрации используем симуляцию данных
-                    # В реальной среде здесь будет интеграция с Telethon
-                    messages = await self.channel_reader.simulate_channel_messages(
-                        channel['username'], 
-                        count=5  # Получаем до 5 сообщений с каждого канала
-                    )
+                    # Пытаемся получить реальные сообщения через Telethon
+                    try:
+                        from .telegram_reader import get_telegram_reader
+                        real_reader = await get_telegram_reader()
+                        if real_reader and real_reader.initialized:
+                            messages = await real_reader.get_channel_messages(
+                                channel['username'], 
+                                limit=10, 
+                                hours_lookback=self.hours_lookback
+                            )
+                            logger.info(f"📡 Используем реальные данные из {channel['username']}")
+                        else:
+                            # Fallback на симуляцию
+                            messages = await self.channel_reader.simulate_channel_messages(
+                                channel['username'], 
+                                count=5
+                            )
+                            logger.info(f"🧪 Используем тестовые данные для {channel['username']}")
+                    except ImportError:
+                        # Fallback на симуляцию если telegram_reader недоступен
+                        messages = await self.channel_reader.simulate_channel_messages(
+                            channel['username'], 
+                            count=5
+                        )
+                        logger.info(f"🧪 Используем тестовые данные для {channel['username']} (fallback)")
                     
                     # Фильтруем новые сообщения
                     new_messages = []
