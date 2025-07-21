@@ -320,59 +320,48 @@ class NewsCollector:
             logger.info(f"📝 Форматирование дайджеста из {len(messages)} новостей...")
             
             if not messages:
-                return "📰 Новостей EdTech за последние часы не найдено."
+                return "Новостей EdTech за последние часы не найдено."
             
-            # Заголовок дайджеста
+            # Лаконичный заголовок
             current_time = datetime.now()
-            time_str = current_time.strftime("%d.%m.%Y %H:%M")
+            date_str = current_time.strftime("%d %B").replace(' 0', ' ') # убираем ведущий ноль
+            months_ru = {
+                'January': 'января', 'February': 'февраля', 'March': 'марта',
+                'April': 'апреля', 'May': 'мая', 'June': 'июня',
+                'July': 'июля', 'August': 'августа', 'September': 'сентября',
+                'October': 'октября', 'November': 'ноября', 'December': 'декабря'
+            }
             
-            header = f"""📰 **EdTech Дайджест** | {time_str}
+            # Переводим месяц на русский
+            for eng, rus in months_ru.items():
+                date_str = date_str.replace(eng, rus)
             
-🔍 {len(messages)} главных новостей образовательных технологий:
-"""
+            header = f"Вечерние вести эдтеха / {date_str}\n"
             
-            # Форматируем каждую новость
+            # Форматируем каждую новость лаконично
             news_items = []
-            for i, msg in enumerate(messages, 1):
-                # Определяем иконку по приоритету канала
-                if msg.get('priority', 0) >= 8:
-                    icon = "🔥"  # Высокий приоритет
-                elif msg.get('priority', 0) >= 5:
-                    icon = "⭐"  # Средний приоритет
-                else:
-                    icon = "📌"  # Обычный приоритет
-                
-                # Форматируем новость
-                summary = msg.get('summary', msg['text'][:100] + "...")
+            for msg in messages:
+                # Получаем краткое название канала
                 channel_name = msg['channel'].replace('@', '')
+                # Упрощаем названия каналов
+                channel_mappings = {
+                    'edtexno': 'Эдтехно',
+                    'vc_edtech': 'VC EdTech',
+                    'rusedweek': 'EdWeek',
+                    'habr_career': 'Хабр Карьера',
+                    'edcrunch': 'EdCrunch',
+                    'te_st_channel': 'Образование которое мы заслужили'
+                }
                 
-                # Добавляем индикаторы качества
-                quality_indicator = ""
-                if msg.get('summary_success', False):
-                    quality = msg.get('summary_quality', 0)
-                    if quality >= 9:
-                        quality_indicator = " ✨"  # Высокое качество
-                    elif quality < 6:
-                        quality_indicator = " 📝"  # Среднее качество
+                display_name = channel_mappings.get(channel_name, channel_name.title())
                 
-                news_item = f"{icon} **{i}.** {summary}{quality_indicator}\n└ [{channel_name}]({msg.get('link', '#')})"
-                
-                if msg.get('fallback_used'):
-                    news_item += " 🔄"  # Индикатор fallback
-                
+                # Лаконичный формат: "— Краткая суммарь (Источник)"
+                summary = msg.get('summary', msg['text'][:80] + "...")
+                news_item = f"— {summary} ({display_name})"
                 news_items.append(news_item)
             
-            # Собираем итоговый дайджест
-            digest = header + "\n\n".join(news_items)
-            
-            # Добавляем footer
-            footer = f"""
-            
----
-🤖 Автоматический дайджест | Следующий выпуск через {self.hours_lookback} часов
-💬 [Обратная связь](https://t.me/vestnik_edtech_bot)"""
-            
-            digest += footer
+            # Собираем итоговый дайджест в лаконичном формате
+            digest = header + "\n" + "\n\n".join(news_items)
             
             # Проверяем длину (Telegram лимит ~4096 символов)
             if len(digest) > 4000:
