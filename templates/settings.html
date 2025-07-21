@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-cog"></i> Настройки системы</h1>
+</div>
+
+<form method="POST" action="/settings/update">
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-sliders-h"></i> Основные параметры</h5>
+                </div>
+                <div class="card-body">
+                    {% for setting in settings %}
+                    <div class="mb-3">
+                        <label for="setting_{{ setting.key }}" class="form-label">
+                            <strong>
+                                {% if setting.key == 'max_news_count' %}
+                                    Максимальное количество новостей
+                                {% elif setting.key == 'target_channel' %}
+                                    Целевой канал для публикации
+                                {% elif setting.key == 'digest_times' %}
+                                    Время публикации дайджестов
+                                {% elif setting.key == 'summary_max_length' %}
+                                    Максимальная длина суммаризации
+                                {% elif setting.key == 'hours_lookback' %}
+                                    Период поиска новостей (часы)
+                                {% else %}
+                                    {{ setting.key }}
+                                {% endif %}
+                            </strong>
+                        </label>
+                        
+                        {% if setting.key in ['max_news_count', 'summary_max_length', 'hours_lookback'] %}
+                            <input type="number" class="form-control" 
+                                   id="setting_{{ setting.key }}" 
+                                   name="setting_{{ setting.key }}" 
+                                   value="{{ setting.value }}"
+                                   min="{% if setting.key == 'max_news_count' %}1{% elif setting.key == 'summary_max_length' %}50{% else %}1{% endif %}"
+                                   max="{% if setting.key == 'max_news_count' %}50{% elif setting.key == 'summary_max_length' %}500{% else %}168{% endif %}">
+                        {% elif setting.key == 'target_channel' %}
+                            <div class="input-group">
+                                <span class="input-group-text">@</span>
+                                <input type="text" class="form-control" 
+                                       id="setting_{{ setting.key }}" 
+                                       name="setting_{{ setting.key }}" 
+                                       value="{{ setting.value.lstrip('@') if setting.value else '' }}">
+                            </div>
+                        {% else %}
+                            <input type="text" class="form-control" 
+                                   id="setting_{{ setting.key }}" 
+                                   name="setting_{{ setting.key }}" 
+                                   value="{{ setting.value or '' }}">
+                        {% endif %}
+                        
+                        {% if setting.description %}
+                        <div class="form-text">{{ setting.description }}</div>
+                        {% endif %}
+                        
+                        {% if setting.key == 'max_news_count' %}
+                        <div class="form-text">Количество новостей в одном дайджесте (1-50)</div>
+                        {% elif setting.key == 'hours_lookback' %}
+                        <div class="form-text">За сколько часов назад искать новости (1-168)</div>
+                        {% elif setting.key == 'digest_times' %}
+                        <div class="form-text">Время в формате HH:MM через запятую, например: 12:00,18:00</div>
+                        {% elif setting.key == 'summary_max_length' %}
+                        <div class="form-text">Максимальное количество символов в суммаризации (50-500)</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Сохранить настройки
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="resetToDefaults()">
+                        <i class="fas fa-undo"></i> Сбросить к умолчаниям
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h6><i class="fas fa-info-circle"></i> Информация о настройках</h6>
+                </div>
+                <div class="card-body">
+                    <h6>Рекомендуемые значения:</h6>
+                    <ul class="small">
+                        <li><strong>Количество новостей:</strong> 8-12</li>
+                        <li><strong>Период поиска:</strong> 6-12 часов</li>
+                        <li><strong>Длина суммаризации:</strong> 120-150 символов</li>
+                        <li><strong>Время публикации:</strong> 12:00,18:00</li>
+                    </ul>
+                    
+                    <hr>
+                    
+                    <h6>Влияние настроек:</h6>
+                    <ul class="small">
+                        <li><strong>Больше новостей</strong> = длиннее дайджест</li>
+                        <li><strong>Больший период</strong> = больше сообщений</li>
+                        <li><strong>Длиннее суммаризация</strong> = подробнее описание</li>
+                    </ul>
+                    
+                    <hr>
+                    
+                    <div class="text-muted small">
+                        <i class="fas fa-exclamation-circle"></i>
+                        Изменения вступают в силу при следующем запуске сбора новостей.
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h6><i class="fas fa-chart-line"></i> Текущие значения</h6>
+                </div>
+                <div class="card-body">
+                    <div id="currentValues">
+                        <!-- Заполняется через JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function resetToDefaults() {
+    if (confirm('Сбросить все настройки к значениям по умолчанию?')) {
+        document.getElementById('setting_max_news_count').value = '10';
+        document.getElementById('setting_hours_lookback').value = '12';
+        document.getElementById('setting_digest_times').value = '12:00,18:00';
+        document.getElementById('setting_summary_max_length').value = '150';
+        document.getElementById('setting_target_channel').value = 'vestnik_edtech_bot';
+    }
+}
+
+function updateCurrentValues() {
+    const maxNews = document.getElementById('setting_max_news_count').value;
+    const hoursBack = document.getElementById('setting_hours_lookback').value;
+    const summaryLength = document.getElementById('setting_summary_max_length').value;
+    
+    const currentValuesDiv = document.getElementById('currentValues');
+    currentValuesDiv.innerHTML = `
+        <small class="text-muted">
+            <strong>Новостей:</strong> ${maxNews}<br>
+            <strong>Период:</strong> ${hoursBack}ч<br>
+            <strong>Суммаризация:</strong> ${summaryLength} симв.<br>
+        </small>
+    `;
+}
+
+// Обновляем текущие значения при изменении
+document.addEventListener('DOMContentLoaded', function() {
+    updateCurrentValues();
+    
+    document.querySelectorAll('input[type="number"]').forEach(input => {
+        input.addEventListener('change', updateCurrentValues);
+    });
+});
+
+// Валидация формы
+document.querySelector('form').addEventListener('submit', function(e) {
+    const targetChannel = document.getElementById('setting_target_channel').value.trim();
+    if (!targetChannel) {
+        e.preventDefault();
+        alert('Целевой канал не может быть пустым');
+        return;
+    }
+    
+    // Добавляем @ если его нет
+    if (!targetChannel.startsWith('@')) {
+        document.getElementById('setting_target_channel').value = targetChannel;
+    }
+});
+</script>
+{% endblock %}

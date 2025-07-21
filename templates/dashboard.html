@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-tachometer-alt"></i> Дашборд</h1>
+    <div>
+        <form method="POST" action="/run-collect" class="d-inline">
+            <button type="submit" class="btn btn-primary" onclick="this.disabled=true; this.innerHTML='<i class=\'fas fa-spinner fa-spin\'></i> Запуск...';">
+                <i class="fas fa-play"></i> Запустить сбор новостей
+            </button>
+        </form>
+        <a href="/channels/add" class="btn btn-success">
+            <i class="fas fa-plus"></i> Добавить канал
+        </a>
+    </div>
+</div>
+
+<!-- Статистика -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <div class="d-flex">
+                    <div class="flex-grow-1">
+                        <p class="card-category text-muted">Активные каналы</p>
+                        <h3 class="card-title">{{ stats.active_channels }}</h3>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-list fa-2x text-info"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <div class="d-flex">
+                    <div class="flex-grow-1">
+                        <p class="card-category text-muted">Запусков (24ч)</p>
+                        <h3 class="card-title">{{ stats.successful_runs_24h }}</h3>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-play-circle fa-2x text-success"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <div class="d-flex">
+                    <div class="flex-grow-1">
+                        <p class="card-category text-muted">Новостей (24ч)</p>
+                        <h3 class="card-title">{{ stats.news_published_24h }}</h3>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-newspaper fa-2x text-warning"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card card-stats">
+            <div class="card-body">
+                <div class="d-flex">
+                    <div class="flex-grow-1">
+                        <p class="card-category text-muted">Сообщений (24ч)</p>
+                        <h3 class="card-title">{{ stats.messages_collected_24h }}</h3>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-envelope fa-2x text-primary"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Последний запуск -->
+{% if stats.last_run %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-clock"></i> Последний запуск</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-2">
+                        <strong>Статус:</strong><br>
+                        <span class="badge bg-{{ 'success' if stats.last_run.status == 'completed' else 'danger' if stats.last_run.status == 'failed' else 'warning' }}">
+                            {{ 'Завершен' if stats.last_run.status == 'completed' else 'Ошибка' if stats.last_run.status == 'failed' else 'Выполняется' }}
+                        </span>
+                    </div>
+                    <div class="col-md-2">
+                        <strong>Время:</strong><br>
+                        {{ stats.last_run.started_at[:19] if stats.last_run.started_at else 'N/A' }}
+                    </div>
+                    <div class="col-md-2">
+                        <strong>Каналов:</strong><br>
+                        {{ stats.last_run.channels_processed or 0 }}
+                    </div>
+                    <div class="col-md-2">
+                        <strong>Сообщений:</strong><br>
+                        {{ stats.last_run.messages_collected or 0 }}
+                    </div>
+                    <div class="col-md-2">
+                        <strong>Опубликовано:</strong><br>
+                        {{ stats.last_run.news_published or 0 }}
+                    </div>
+                    <div class="col-md-2">
+                        {% if stats.last_run.error_message %}
+                            <strong>Ошибка:</strong><br>
+                            <small class="text-danger">{{ stats.last_run.error_message[:50] }}...</small>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Последние запуски -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between">
+        <h5><i class="fas fa-history"></i> Последние запуски</h5>
+        <a href="/logs" class="btn btn-sm btn-outline-primary">Все логи</a>
+    </div>
+    <div class="card-body">
+        {% if recent_logs %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Время</th>
+                        <th>Статус</th>
+                        <th>Каналы</th>
+                        <th>Сообщения</th>
+                        <th>Новости</th>
+                        <th>Длительность</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in recent_logs %}
+                    <tr>
+                        <td>{{ log.started_at[:19] if log.started_at else 'N/A' }}</td>
+                        <td>
+                            <span class="status-{{ log.status }}">
+                                <i class="fas fa-{{ 'check' if log.status == 'completed' else 'times' if log.status == 'failed' else 'clock' }}"></i>
+                                {{ 'Завершен' if log.status == 'completed' else 'Ошибка' if log.status == 'failed' else 'Выполняется' }}
+                            </span>
+                        </td>
+                        <td>{{ log.channels_processed or 0 }}</td>
+                        <td>{{ log.messages_collected or 0 }}</td>
+                        <td>{{ log.news_published or 0 }}</td>
+                        <td>
+                            {% if log.started_at and log.completed_at %}
+                                Завершено
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">Запусков пока не было</p>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Автообновление статистики каждые 30 секунд
+setInterval(function() {
+    fetch('/api/stats')
+        .then(response => response.json())
+        .then(data => {
+            // Обновляем числа на карточках
+            document.querySelector('.card-stats:nth-child(1) .card-title').textContent = data.active_channels;
+            document.querySelector('.card-stats:nth-child(2) .card-title').textContent = data.successful_runs_24h;
+            document.querySelector('.card-stats:nth-child(3) .card-title').textContent = data.news_published_24h;
+            document.querySelector('.card-stats:nth-child(4) .card-title').textContent = data.messages_collected_24h;
+        })
+        .catch(error => console.log('Ошибка обновления статистики:', error));
+}, 30000);
+</script>
+{% endblock %}

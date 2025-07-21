@@ -1,0 +1,9 @@
+{
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "startCommand": "python src/admin_panel.py",
+    "healthcheckPath": "/health"
+  }
+}

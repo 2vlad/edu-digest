@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-file-text"></i> Логи запусков</h1>
+    <div>
+        <button class="btn btn-outline-primary" onclick="refreshLogs()">
+            <i class="fas fa-sync"></i> Обновить
+        </button>
+        <button class="btn btn-outline-danger" onclick="clearOldLogs()">
+            <i class="fas fa-trash"></i> Очистить старые
+        </button>
+    </div>
+</div>
+
+{% if logs %}
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Время начала</th>
+                        <th>Время завершения</th>
+                        <th>Статус</th>
+                        <th>Каналы</th>
+                        <th>Сообщения</th>
+                        <th>Новости</th>
+                        <th>Длительность</th>
+                        <th>Ошибка</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr class="{% if log.status == 'failed' %}table-danger{% elif log.status == 'completed' %}table-success{% else %}table-warning{% endif %}">
+                        <td>{{ log.id }}</td>
+                        <td>
+                            {% if log.started_at %}
+                                {{ log.started_at[:19] }}
+                            {% else %}
+                                N/A
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if log.completed_at %}
+                                {{ log.completed_at[:19] }}
+                            {% else %}
+                                <span class="text-muted">Выполняется...</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if log.status == 'completed' %}
+                                <span class="badge bg-success">
+                                    <i class="fas fa-check"></i> Завершен
+                                </span>
+                            {% elif log.status == 'failed' %}
+                                <span class="badge bg-danger">
+                                    <i class="fas fa-times"></i> Ошибка
+                                </span>
+                            {% else %}
+                                <span class="badge bg-warning">
+                                    <i class="fas fa-clock"></i> Выполняется
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td>{{ log.channels_processed or 0 }}</td>
+                        <td>{{ log.messages_collected or 0 }}</td>
+                        <td>{{ log.news_published or 0 }}</td>
+                        <td>
+                            {% if log.started_at and log.completed_at %}
+                                Завершено
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if log.error_message %}
+                                <span class="text-danger" title="{{ log.error_message }}">
+                                    {{ log.error_message[:50] }}{% if log.error_message|length > 50 %}...{% endif %}
+                                </span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- Пагинация -->
+    {% if total_pages > 1 %}
+    <div class="card-footer">
+        <nav aria-label="Пагинация логов">
+            <ul class="pagination justify-content-center mb-0">
+                {% if has_prev %}
+                    <li class="page-item">
+                        <a class="page-link" href="/logs?page={{ page - 1 }}">Предыдущая</a>
+                    </li>
+                {% endif %}
+                
+                {% for page_num in range(1, total_pages + 1) %}
+                    {% if page_num == page %}
+                        <li class="page-item active">
+                            <span class="page-link">{{ page_num }}</span>
+                        </li>
+                    {% elif page_num <= page + 2 and page_num >= page - 2 %}
+                        <li class="page-item">
+                            <a class="page-link" href="/logs?page={{ page_num }}">{{ page_num }}</a>
+                        </li>
+                    {% elif page_num == 1 or page_num == total_pages %}
+                        <li class="page-item">
+                            <a class="page-link" href="/logs?page={{ page_num }}">{{ page_num }}</a>
+                        </li>
+                    {% elif (page_num == page - 3 and page > 4) or (page_num == page + 3 and page < total_pages - 3) %}
+                        <li class="page-item disabled">
+                            <span class="page-link">...</span>
+                        </li>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="/logs?page={{ page + 1 }}">Следующая</a>
+                    </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Статистика -->
+<div class="row mt-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Всего запусков</h5>
+                <h2 class="text-primary">{{ logs|length }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Успешных</h5>
+                <h2 class="text-success">{{ logs|selectattr('status', 'equalto', 'completed')|list|length }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">С ошибками</h5>
+                <h2 class="text-danger">{{ logs|selectattr('status', 'equalto', 'failed')|list|length }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Новостей всего</h5>
+                <h2 class="text-info">{{ logs|sum(attribute='news_published') or 0 }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="card">
+    <div class="card-body text-center">
+        <i class="fas fa-file-text fa-3x text-muted mb-3"></i>
+        <h5>Логов пока нет</h5>
+        <p class="text-muted">Запуски сбора новостей будут отображаться здесь</p>
+        <form method="POST" action="/run-collect" class="d-inline">
+            <button type="submit" class="btn btn-primary">
+                <i class="fas fa-play"></i> Запустить первый сбор
+            </button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function refreshLogs() {
+    location.reload();
+}
+
+function clearOldLogs() {
+    if (confirm('Удалить логи старше 30 дней? Это действие нельзя отменить.')) {
+        // В реальном приложении здесь был бы AJAX запрос на удаление
+        alert('Функция очистки логов будет добавлена в будущих версиях');
+    }
+}
+
+// Автообновление каждые 30 секунд
+setInterval(function() {
+    // Проверяем есть ли выполняющиеся запуски
+    const runningLogs = document.querySelectorAll('.table-warning');
+    if (runningLogs.length > 0) {
+        location.reload();
+    }
+}, 30000);
+</script>
+{% endblock %}

@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-list"></i> Управление каналами</h1>
+    <a href="/channels/add" class="btn btn-success">
+        <i class="fas fa-plus"></i> Добавить канал
+    </a>
+</div>
+
+{% if channels %}
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Канал</th>
+                        <th>Название</th>
+                        <th>Приоритет</th>
+                        <th>Статус</th>
+                        <th>Сообщений (7д)</th>
+                        <th>Последнее сообщение</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for channel in channels %}
+                    <tr class="{% if channel.priority >= 8 %}priority-high{% elif channel.priority >= 5 %}priority-medium{% else %}priority-low{% endif %}">
+                        <td>
+                            <code>{{ channel.username }}</code>
+                        </td>
+                        <td>
+                            <strong>{{ channel.display_name }}</strong>
+                            <br><small class="text-muted">ID: {{ channel.id }}</small>
+                        </td>
+                        <td>
+                            <span class="badge bg-{{ 'danger' if channel.priority >= 8 else 'warning' if channel.priority >= 5 else 'success' }}">
+                                {{ channel.priority }}/10
+                            </span>
+                        </td>
+                        <td>
+                            {% if channel.is_active %}
+                                <span class="badge bg-success">
+                                    <i class="fas fa-check"></i> Активен
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary">
+                                    <i class="fas fa-pause"></i> Отключен
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ channel.messages_7d or 0 }}
+                        </td>
+                        <td>
+                            {% if channel.last_message_date %}
+                                {{ channel.last_message_date[:16] }}
+                            {% else %}
+                                <span class="text-muted">Никогда</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group" role="group">
+                                <a href="/channels/{{ channel.id }}/edit" class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                                <button type="button" class="btn btn-sm btn-outline-danger" 
+                                        onclick="confirmDelete('{{ channel.id }}', '{{ channel.display_name }}')">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Сводка по каналам -->
+<div class="row mt-4">
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Всего каналов</h5>
+                <h2 class="text-primary">{{ channels|length }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Активных</h5>
+                <h2 class="text-success">{{ channels|selectattr('is_active')|list|length }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Высокий приоритет</h5>
+                <h2 class="text-warning">{{ channels|selectattr('priority', 'ge', 8)|list|length }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="card">
+    <div class="card-body text-center">
+        <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+        <h5>Каналов пока нет</h5>
+        <p class="text-muted">Добавьте первый канал для мониторинга новостей</p>
+        <a href="/channels/add" class="btn btn-primary">
+            <i class="fas fa-plus"></i> Добавить первый канал
+        </a>
+    </div>
+</div>
+{% endif %}
+
+<!-- Модал подтверждения удаления -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Подтверждение удаления</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Вы действительно хотите удалить канал <strong id="channelName"></strong>?</p>
+                <p class="text-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Это действие нельзя отменить. Все связанные данные будут удалены.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <form id="deleteForm" method="POST" class="d-inline">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="fas fa-trash"></i> Удалить
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function confirmDelete(channelId, channelName) {
+    document.getElementById('channelName').textContent = channelName;
+    document.getElementById('deleteForm').action = '/channels/' + channelId + '/delete';
+    
+    var modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    modal.show();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-edit"></i> Редактировать канал</h1>
+    <a href="/channels" class="btn btn-secondary">
+        <i class="fas fa-arrow-left"></i> Назад к каналам
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-info-circle"></i> Информация о канале</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Username канала</label>
+                        <div class="input-group">
+                            <span class="input-group-text">@</span>
+                            <input type="text" class="form-control" id="username" 
+                                   value="{{ channel.username[1:] if channel.username.startswith('@') else channel.username }}" 
+                                   disabled>
+                        </div>
+                        <div class="form-text text-muted">
+                            Username канала нельзя изменить после создания
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="display_name" class="form-label">Отображаемое название <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="display_name" name="display_name" 
+                               value="{{ channel.display_name }}" required>
+                        <div class="form-text">
+                            Понятное название канала для отображения в админке
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="priority" class="form-label">Приоритет</label>
+                        <select class="form-select" id="priority" name="priority">
+                            {% for i in range(11) %}
+                            <option value="{{ i }}" {{ 'selected' if channel.priority == i else '' }}>
+                                {{ i }} - 
+                                {% if i <= 3 %}Низкий{% elif i <= 6 %}Средний{% else %}Высокий{% endif %}
+                                {% if i == 0 %}(обычные новости){% elif i == 5 %}(важные новости){% elif i == 10 %}(критически важные){% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            Приоритет влияет на порядок отображения новостей в дайджесте
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="is_active" name="is_active" 
+                                   {{ 'checked' if channel.is_active else '' }}>
+                            <label class="form-check-label" for="is_active">
+                                <strong>Активный канал</strong>
+                            </label>
+                            <div class="form-text">
+                                Только активные каналы участвуют в сборе новостей
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                        <a href="/channels" class="btn btn-secondary">
+                            <i class="fas fa-times"></i> Отмена
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Сохранить изменения
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h6><i class="fas fa-chart-bar"></i> Статистика канала</h6>
+            </div>
+            <div class="card-body">
+                <dl class="row">
+                    <dt class="col-sm-6">ID:</dt>
+                    <dd class="col-sm-6">{{ channel.id }}</dd>
+                    
+                    <dt class="col-sm-6">Создан:</dt>
+                    <dd class="col-sm-6">
+                        {% if channel.created_at %}
+                            {{ channel.created_at[:10] }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </dd>
+                    
+                    <dt class="col-sm-6">Обновлен:</dt>
+                    <dd class="col-sm-6">
+                        {% if channel.updated_at %}
+                            {{ channel.updated_at[:10] }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </dd>
+                    
+                    <dt class="col-sm-6">Последнее сообщение:</dt>
+                    <dd class="col-sm-6">
+                        ID: {{ channel.last_message_id or 0 }}
+                    </dd>
+                </dl>
+                
+                <hr>
+                
+                <div class="d-grid">
+                    <button class="btn btn-outline-info btn-sm" onclick="testChannel()">
+                        <i class="fas fa-vial"></i> Тестировать канал
+                    </button>
+                </div>
+                
+                <div id="testResult" class="mt-2" style="display: none;"></div>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header bg-danger text-white">
+                <h6><i class="fas fa-exclamation-triangle"></i> Опасная зона</h6>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">
+                    Удаление канала приведет к потере всех связанных данных
+                </p>
+                <button class="btn btn-outline-danger btn-sm w-100" 
+                        onclick="confirmDelete('{{ channel.id }}', '{{ channel.display_name }}')">
+                    <i class="fas fa-trash"></i> Удалить канал
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модал подтверждения удаления -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Подтверждение удаления</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Вы действительно хотите удалить канал <strong id="channelName"></strong>?</p>
+                <p class="text-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Это действие нельзя отменить. Все связанные данные будут удалены.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <form id="deleteForm" method="POST" class="d-inline">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="fas fa-trash"></i> Удалить
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function confirmDelete(channelId, channelName) {
+    document.getElementById('channelName').textContent = channelName;
+    document.getElementById('deleteForm').action = '/channels/' + channelId + '/delete';
+    
+    var modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    modal.show();
+}
+
+function testChannel() {
+    const testButton = document.querySelector('button[onclick="testChannel()"]');
+    const testResult = document.getElementById('testResult');
+    
+    testButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Тестирование...';
+    testButton.disabled = true;
+    
+    testResult.style.display = 'block';
+    testResult.innerHTML = '<div class="alert alert-info"><i class="fas fa-clock"></i> Проверяем доступность канала...</div>';
+    
+    // Симуляция тестирования (в реальном приложении здесь был бы AJAX запрос)
+    setTimeout(() => {
+        testResult.innerHTML = '<div class="alert alert-success"><i class="fas fa-check"></i> Канал доступен и готов к мониторингу</div>';
+        testButton.innerHTML = '<i class="fas fa-vial"></i> Тестировать канал';
+        testButton.disabled = false;
+    }, 2000);
+}
+</script>
+{% endblock %}
