@@ -339,7 +339,10 @@ def run_collect():
     """Запуск сбора новостей из админки"""
     try:
         import asyncio
-        from news_collector import NewsCollector
+        try:
+            from .news_collector import NewsCollector
+        except ImportError:
+            from news_collector import NewsCollector
         
         # Создаем новый цикл событий для async функции
         collector = NewsCollector()
