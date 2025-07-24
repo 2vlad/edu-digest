@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Task 5: Основной модуль сбора новостей
+Основной модуль сбора новостей
 Центральный модуль для сбора, обработки и публикации новостного дайджеста
+ТОЛЬКО SUPABASE - БЕЗ SQLite FALLBACK
 """
 
 import asyncio
@@ -10,18 +11,12 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 
 # Импорты внутренних модулей
-try:
-    from .db_adapter import (ChannelsDB, ProcessedMessagesDB, SettingsDB, create_connection)
-    from .claude_summarizer import get_claude_summarizer
-    from .telegram_bot import get_telegram_bot, TelegramChannelReader
-except ImportError:
-    from db_adapter import (ChannelsDB, ProcessedMessagesDB, SettingsDB, create_connection)
-    from claude_summarizer import get_claude_summarizer
-    from telegram_bot import get_telegram_bot, TelegramChannelReader
+from .database import (ChannelsDB, ProcessedMessagesDB, SettingsDB, 
+                      create_connection)
+from .claude_summarizer import get_claude_summarizer
+from .telegram_bot import get_telegram_bot, TelegramChannelReader
 
 # Настройка логирования
-import os
-os.makedirs('logs', exist_ok=True)  # Создаем папку logs если не существует
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -34,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class NewsCollector:
-    """5.1-5.7: Основной класс для сбора и обработки новостного дайджеста"""
+    """Основной класс для сбора и обработки новостного дайджеста"""
     
     def __init__(self):
         self.claude_summarizer = None
@@ -52,7 +47,7 @@ class NewsCollector:
         try:
             logger.info("🚀 Инициализация NewsCollector...")
             
-            # 5.1. Инициализация компонентов сбора
+            # Инициализация компонентов сбора
             self.claude_summarizer = await get_claude_summarizer()
             self.telegram_bot = await get_telegram_bot() 
             self.channel_reader = TelegramChannelReader()
@@ -81,18 +76,24 @@ class NewsCollector:
     def _create_run_log(self) -> int:
         """Создание записи о запуске сбора новостей"""
         conn = create_connection()
+        if conn is None:
+            logger.warning("⚠️ PostgreSQL недоступен, пропускаем создание лога запуска")
+            return None
+            
         cursor = conn.cursor()
         try:
             cursor.execute('''
                 INSERT INTO run_logs (started_at, status) 
                 VALUES (CURRENT_TIMESTAMP, 'started')
+                RETURNING id
             ''')
-            conn.commit()
-            run_id = cursor.lastrowid
+            result = cursor.fetchone()
+            run_id = result['id']
             logger.info(f"📝 Создан лог запуска #{run_id}")
             return run_id
-        finally:
-            conn.close()
+        except Exception as e:
+            logger.error(f"❌ Ошибка создания лога запуска: {e}")
+            return None
     
     def _update_run_log(self, status: str, channels_processed: int = 0, 
                        messages_collected: int = 0, news_published: int = 0, 
@@ -102,25 +103,28 @@ class NewsCollector:
             return
             
         conn = create_connection()
+        if conn is None:
+            logger.warning("⚠️ PostgreSQL недоступен, пропускаем обновление лога запуска")
+            return
+            
         cursor = conn.cursor()
         try:
             cursor.execute('''
                 UPDATE run_logs SET 
                     completed_at = CURRENT_TIMESTAMP,
-                    status = ?,
-                    channels_processed = ?,
-                    messages_collected = ?,
-                    news_published = ?,
-                    error_message = ?
-                WHERE id = ?
+                    status = %s,
+                    channels_processed = %s,
+                    messages_collected = %s,
+                    news_published = %s,
+                    error_message = %s
+                WHERE id = %s
             ''', (status, channels_processed, messages_collected, 
                   news_published, error_message, self.run_id))
-            conn.commit()
-        finally:
-            conn.close()
+        except Exception as e:
+            logger.error(f"❌ Ошибка обновления лога запуска: {e}")
     
     async def collect_news(self) -> Dict[str, Any]:
-        """5.2. Сбор новых сообщений из всех активных каналов"""
+        """Сбор новых сообщений из всех активных каналов"""
         try:
             logger.info("📡 Начинаем сбор новостей из каналов...")
             
@@ -140,51 +144,29 @@ class NewsCollector:
                 try:
                     logger.info(f"🔍 Обрабатываем канал {channel['username']} (приоритет: {channel['priority']})")
                     
-                    # PRODUCTION MODE: ТОЛЬКО РЕАЛЬНЫЕ ДАННЫЕ!
-                    # Получаем реальные сообщения через Telethon - БЕЗ FALLBACK НА ТЕСТЫ
+                    # Получаем реальные сообщения через Telethon
                     try:
-                        logger.info(f"📡 Попытка получения РЕАЛЬНЫХ данных из {channel['username']}")
+                        logger.info(f"📡 Получение реальных данных из {channel['username']}")
                         from .telegram_reader import get_telegram_reader
                         real_reader = await get_telegram_reader()
                         
                         if not real_reader:
-                            error_msg = f"❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось инициализировать Telegram reader для {channel['username']}"
-                            logger.error(error_msg)
-                            logger.error("💡 Проверьте переменные окружения: TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN")
-                            # НЕ ИСПОЛЬЗУЕМ ТЕСТОВЫЕ ДАННЫЕ - пропускаем канал!
+                            logger.warning(f"⚠️ Не удалось инициализировать Telegram reader для {channel['username']}, пропускаем")
                             continue
                             
                         if not real_reader.initialized:
-                            error_msg = f"❌ КРИТИЧЕСКАЯ ОШИБКА: Telegram reader не инициализирован для {channel['username']}"
-                            logger.error(error_msg)
-                            logger.error("💡 Проверьте подключение к Telegram API и валидность токенов")
-                            # НЕ ИСПОЛЬЗУЕМ ТЕСТОВЫЕ ДАННЫЕ - пропускаем канал!
+                            logger.warning(f"⚠️ Telegram reader не инициализирован для {channel['username']}, пропускаем")
                             continue
                             
-                        messages = await real_reader.get_channel_messages(
-                            channel['username'], 
-                            limit=10, 
-                            hours_lookback=self.hours_lookback
-                        )
+                        # Получаем новые сообщения
+                        messages = await real_reader.get_channel_messages(channel['username'], limit=50, hours_lookback=self.hours_lookback)
                         
                         if not messages:
-                            logger.warning(f"⚠️ Нет новых сообщений в канале {channel['username']} за последние {self.hours_lookback} часов")
+                            logger.info(f"ℹ️ {channel['username']}: новых сообщений не найдено, пропускаем")
                             continue
                             
-                        logger.info(f"✅ Получено {len(messages)} РЕАЛЬНЫХ сообщений из {channel['username']}")
-                        
-                    except ImportError as import_error:
-                        error_msg = f"❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось импортировать telegram_reader: {import_error}"
-                        logger.error(error_msg)
-                        logger.error("💡 Проверьте установку Telethon и конфигурацию модуля")
-                        # НЕ ИСПОЛЬЗУЕМ ТЕСТОВЫЕ ДАННЫЕ - пропускаем канал!
-                        continue
-                        
-                    except Exception as telegram_error:
-                        error_msg = f"❌ КРИТИЧЕСКАЯ ОШИБКА подключения к Telegram для {channel['username']}: {telegram_error}"
-                        logger.error(error_msg)
-                        logger.error("💡 Проверьте сетевое подключение и настройки Telegram API")
-                        # НЕ ИСПОЛЬЗУЕМ ТЕСТОВЫЕ ДАННЫЕ - пропускаем канал!
+                    except Exception as reader_error:
+                        logger.warning(f"⚠️ Ошибка получения данных из {channel['username']}: {reader_error} - пропускаем канал")
                         continue
                     
                     # Фильтруем новые сообщения
@@ -192,6 +174,7 @@ class NewsCollector:
                     for msg in messages:
                         msg['channel_id'] = channel['id']
                         msg['priority'] = channel['priority']
+                        msg['channel_display'] = channel.get('display_name', channel['username'])
                         
                         # Проверяем, не было ли сообщение уже обработано
                         if not ProcessedMessagesDB.is_message_processed(channel['id'], msg['id']):
@@ -209,13 +192,12 @@ class NewsCollector:
             # Сортируем по приоритету канала и времени
             all_messages.sort(key=lambda x: (-x['priority'], -x['date'].timestamp()))
             
-            logger.info(f"📊 Собрано {len(all_messages)} новых сообщений из {channels_processed} каналов")
+            logger.info(f"📊 Всего собрано {len(all_messages)} новых сообщений из {channels_processed} каналов")
             
             return {
                 "success": True,
                 "messages": all_messages,
-                "channels_processed": channels_processed,
-                "total_messages": len(all_messages)
+                "channels_processed": channels_processed
             }
             
         except Exception as e:
@@ -223,186 +205,191 @@ class NewsCollector:
             return {"success": False, "error": str(e)}
     
     async def filter_and_prioritize(self, messages: List[Dict]) -> List[Dict]:
-        """5.3. Фильтрация и приоритизация сообщений"""
-        try:
-            logger.info(f"🔍 Фильтрация и приоритизация {len(messages)} сообщений...")
+        """Фильтрация и приоритизация сообщений"""
+        if not messages:
+            logger.warning("⚠️ Нет сообщений для фильтрации")
+            return []
+        
+        logger.info(f"🎯 Фильтрация {len(messages)} сообщений...")
+        
+        # Фильтрация по времени (последние N часов) - используем UTC
+        from datetime import timezone
+        time_threshold = datetime.now(timezone.utc) - timedelta(hours=self.hours_lookback)
+        time_filtered = []
+        
+        for msg in messages:
+            if msg['date'] >= time_threshold:
+                time_filtered.append(msg)
+        
+        logger.info(f"⏰ После фильтрации по времени: {len(time_filtered)} сообщений")
+        
+        # Фильтрация по релевантности (EdTech ключевые слова)
+        edtech_keywords = [
+            'образован', 'учеб', 'студент', 'университет', 'школ', 'онлайн-курс',
+            'edtech', 'образовательн', 'дистанционн', 'цифров', 'технолог',
+            'платформ', 'стартап', 'инновац', 'искусственный интеллект', 'ai',
+            'машинное обучение', 'данные', 'аналитик', 'курс', 'обучени'
+        ]
+        
+        content_filtered = []
+        for msg in time_filtered:
+            text_lower = msg['text'].lower()
+            relevance_score = sum(1 for keyword in edtech_keywords if keyword in text_lower)
             
-            if not messages:
-                return []
-            
-            # Фильтрация по времени
-            time_limit = datetime.now() - timedelta(hours=self.hours_lookback)
-            time_filtered = [msg for msg in messages if msg['date'] >= time_limit]
-            
-            logger.info(f"⏰ После фильтрации по времени ({self.hours_lookback}ч): {len(time_filtered)} сообщений")
-            
-            # Фильтрация по содержанию (EdTech релевантность)
-            edtech_keywords = [
-                'образование', 'обучение', 'курс', 'студент', 'учебн', 'школ', 'университет',
-                'edtech', 'онлайн', 'платформа', 'технологи', 'стартап', 'инвестиции',
-                'ИИ', 'AI', 'VR', 'AR', 'цифров', 'digital', 'learning'
-            ]
-            
-            content_filtered = []
-            for msg in time_filtered:
-                text_lower = msg['text'].lower()
-                relevance_score = sum(1 for keyword in edtech_keywords if keyword in text_lower)
-                
-                if relevance_score > 0:  # Минимум одно EdTech ключевое слово
-                    msg['relevance_score'] = relevance_score
-                    content_filtered.append(msg)
-            
-            logger.info(f"🎯 После фильтрации по релевантности: {len(content_filtered)} сообщений")
-            
-            # Сортировка по комбинированному приоритету
-            # Учитываем: приоритет канала, релевантность, время
-            def priority_score(msg):
-                return (
-                    msg['priority'] * 10 +  # Приоритет канала (0-100)
-                    msg.get('relevance_score', 0) * 5 +  # Релевантность (0-50+)
-                    min(msg['views'] or 0, 1000) / 100  # Популярность (0-10)
-                )
-            
-            content_filtered.sort(key=priority_score, reverse=True)
-            
-            # Ограничиваем количество
-            final_messages = content_filtered[:self.max_news_count]
-            
-            logger.info(f"📋 Финальная выборка: {len(final_messages)} сообщений (макс. {self.max_news_count})")
-            
-            return final_messages
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка фильтрации сообщений: {e}")
-            return messages[:self.max_news_count]  # Fallback: берем первые N
+            if relevance_score > 0:  # Минимум одно EdTech ключевое слово
+                msg['relevance_score'] = relevance_score
+                content_filtered.append(msg)
+        
+        logger.info(f"🎯 После фильтрации по релевантности: {len(content_filtered)} сообщений")
+        
+        # Сортировка по комбинированному приоритету
+        def priority_score(msg):
+            return (
+                msg['priority'] * 10 +  # Приоритет канала (0-100)
+                msg.get('relevance_score', 0) * 5 +  # Релевантность (0-50+)
+                min(msg.get('views', 0) or 0, 1000) / 100  # Популярность (0-10)
+            )
+        
+        content_filtered.sort(key=priority_score, reverse=True)
+        
+        # Ограничиваем количество
+        final_messages = content_filtered[:self.max_news_count]
+        
+        logger.info(f"📋 Финальная выборка: {len(final_messages)} сообщений (макс. {self.max_news_count})")
+        
+        return final_messages
     
     async def summarize_messages(self, messages: List[Dict]) -> List[Dict]:
-        """5.4. Суммаризация сообщений через Claude API"""
-        try:
-            logger.info(f"🤖 Начинаем суммаризацию {len(messages)} сообщений...")
-            
-            if not messages:
-                return []
-            
-            # Подготавливаем сообщения для батчевой обработки
-            batch_messages = []
-            for msg in messages:
-                batch_messages.append({
-                    'text': msg['text'],
-                    'channel': msg['channel'],
-                    'original_msg': msg  # Сохраняем оригинальные данные
-                })
-            
-            # Запускаем батчевую суммаризацию
-            summarized = await self.claude_summarizer.summarize_batch(
-                batch_messages, 
-                max_concurrent=3
-            )
-            
-            # Обрабатываем результаты
-            processed_messages = []
-            successful_summaries = 0
-            
-            for result in summarized:
-                original_msg = result['original_msg']
+        """Суммаризация сообщений с помощью Claude AI"""
+        if not messages:
+            logger.warning("⚠️ Нет сообщений для суммаризации")
+            return []
+        
+        logger.info(f"🤖 Суммаризация {len(messages)} сообщений...")
+        
+        summarized_messages = []
+        
+        for msg in messages:
+            try:
+                # Суммаризируем текст сообщения
+                if self.claude_summarizer:
+                    result = await self.claude_summarizer.summarize_message(
+                        msg['text'], 
+                        msg.get('channel_display', msg.get('channel', ''))
+                    )
+                    if result['success']:
+                        msg['summary'] = result['summary']
+                        msg['summary_quality'] = result.get('quality_score', 8)
+                    else:
+                        msg['summary'] = result['summary']  # Fallback summary
+                        msg['summary_quality'] = 3
+                else:
+                    # Fallback: берем первые 150 символов
+                    msg['summary'] = msg['text'][:150] + "..." if len(msg['text']) > 150 else msg['text']
+                    msg['summary_quality'] = 5
                 
-                # Создаем финальную структуру сообщения
-                processed_msg = {
-                    **original_msg,
-                    'summary': result['summary'],
-                    'summary_success': result['summary_success'],
-                    'summary_quality': result.get('summary_quality', 0),
-                    'processing_time': result.get('processing_time', 0),
-                    'fallback_used': result.get('fallback_used', False)
-                }
+                summarized_messages.append(msg)
                 
-                processed_messages.append(processed_msg)
-                
-                if result['summary_success']:
-                    successful_summaries += 1
-            
-            success_rate = successful_summaries / len(messages) * 100 if messages else 0
-            avg_quality = sum(msg.get('summary_quality', 0) for msg in processed_messages) / len(processed_messages) if processed_messages else 0
-            
-            logger.info(f"✅ Суммаризация завершена: {successful_summaries}/{len(messages)} ({success_rate:.1f}%) успешно")
-            logger.info(f"📊 Средняя оценка качества: {avg_quality:.1f}/10")
-            
-            return processed_messages
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка суммаризации: {e}")
-            # Fallback: возвращаем сообщения с исходным текстом как summary
-            for msg in messages:
-                msg['summary'] = msg['text'][:100] + "..."
-                msg['summary_success'] = False
-                msg['fallback_used'] = True
-            return messages
+            except Exception as e:
+                logger.error(f"❌ Ошибка суммаризации сообщения {msg['id']}: {e}")
+                # Добавляем сообщение без суммаризации
+                msg['summary'] = msg['text'][:150] + "..." if len(msg['text']) > 150 else msg['text']
+                msg['summary_quality'] = 3
+                summarized_messages.append(msg)
+        
+        logger.info(f"✅ Суммаризировано {len(summarized_messages)} сообщений")
+        return summarized_messages
     
     def format_digest(self, messages: List[Dict]) -> str:
-        """5.5. Форматирование дайджеста для публикации"""
-        try:
-            logger.info(f"📝 Форматирование дайджеста из {len(messages)} новостей...")
-            
-            if not messages:
-                return "Новостей EdTech за последние часы не найдено."
-            
-            # Лаконичный заголовок
-            current_time = datetime.now()
-            date_str = current_time.strftime("%d %B").replace(' 0', ' ') # убираем ведущий ноль
-            months_ru = {
-                'January': 'января', 'February': 'февраля', 'March': 'марта',
-                'April': 'апреля', 'May': 'мая', 'June': 'июня',
-                'July': 'июля', 'August': 'августа', 'September': 'сентября',
-                'October': 'октября', 'November': 'ноября', 'December': 'декабря'
-            }
-            
-            # Переводим месяц на русский
-            for eng, rus in months_ru.items():
-                date_str = date_str.replace(eng, rus)
-            
-            header = f"Вечерние вести эдтеха / {date_str}\n"
-            
-            # Форматируем каждую новость лаконично
-            news_items = []
-            for msg in messages:
-                # Получаем краткое название канала
-                channel_name = msg['channel'].replace('@', '')
-                # Упрощаем названия каналов
-                channel_mappings = {
-                    'edtexno': 'Эдтехно',
-                    'vc_edtech': 'VC EdTech',
-                    'rusedweek': 'EdWeek',
-                    'habr_career': 'Хабр Карьера',
-                    'edcrunch': 'EdCrunch',
-                    'te_st_channel': 'Образование которое мы заслужили'
-                }
+        """Форматирование дайджеста для публикации"""
+        if not messages:
+            return "📰 Новых новостей EdTech сегодня не найдено."
+        
+        logger.info(f"📝 Форматирование дайджеста из {len(messages)} сообщений...")
+        
+        # Определяем время суток для заголовка
+        from datetime import timezone
+        current_hour = datetime.now(timezone.utc).hour + 3  # MSK
+        digest_type = "Утренний" if 9 <= current_hour < 15 else "Вечерний"
+        
+        digest_lines = []
+        # Убираем звездочки у тайтла
+        digest_lines.append(f"{digest_type} дайджест")
+        digest_lines.append("")  # Отбивка после заголовка
+        
+        # Форматируем сообщения
+        for i, msg in enumerate(messages):
+            # Используем суммаризацию Claude или оригинальный текст
+            if 'summary' in msg and msg['summary']:
+                summary = msg['summary']
+            else:
+                # Fallback к оригинальному тексту (более развернутый)
+                text = msg['text']
                 
-                display_name = channel_mappings.get(channel_name, channel_name.title())
+                # Извлекаем первые два предложения или первые 200 символов
+                sentences_end = []
+                for idx, char in enumerate(text):
+                    if char in '.!?' and idx < 300:
+                        sentences_end.append(idx)
+                        if len(sentences_end) >= 2:  # Берем два предложения
+                            break
                 
-                # Лаконичный формат: "— Краткая суммарь (Источник)"
-                summary = msg.get('summary', msg['text'][:80] + "...")
-                news_item = f"— {summary} ({display_name})"
-                news_items.append(news_item)
+                if len(sentences_end) >= 2:
+                    summary = text[:sentences_end[1] + 1].strip()
+                elif len(sentences_end) == 1:
+                    summary = text[:sentences_end[0] + 1].strip()
+                else:
+                    # Берем первые слова до 150 символов
+                    summary = text[:150].strip()
+                    if len(text) > 150:
+                        summary += '...'
+                
+                # Убираем лишние символы и ссылки
+                summary = summary.replace('**', '').replace('*', '')
+                summary = summary.split('\n')[0]  # Берем только первую строку
+                summary = summary.split('[')[0]  # Убираем ссылки в квадратных скобках
+                summary = summary.split('(http')[0]  # Убираем URL
+                summary = summary.strip()
             
-            # Собираем итоговый дайджест в лаконичном формате
-            digest = header + "\n" + "\n\n".join(news_items)
+            # Получаем название канала и создаем ссылку
+            channel_display = msg.get('channel_display', msg.get('channel', 'Unknown'))
+            channel_username = msg.get('channel', '')
             
-            # Проверяем длину (Telegram лимит ~4096 символов)
-            if len(digest) > 4000:
-                logger.warning("⚠️ Дайджест слишком длинный, сокращаем...")
-                # Сокращаем количество новостей
-                short_messages = messages[:min(8, len(messages))]
-                return self.format_digest(short_messages)
+            # Создаем ссылку на канал (убираем @ для правильной ссылки)
+            clean_username = channel_username.lstrip('@') if channel_username else 'unknown'
+            channel_link = f"https://t.me/{clean_username}"
             
-            logger.info(f"📄 Дайджест сформирован: {len(digest)} символов, {len(messages)} новостей")
-            return digest
+            # Форматируем строку: — Заголовок ([Канал](ссылка))
+            digest_lines.append(f"— {summary} ([{channel_display}]({channel_link}))")
             
-        except Exception as e:
-            logger.error(f"❌ Ошибка форматирования дайджеста: {e}")
-            return f"❌ Ошибка формирования дайджеста: {str(e)}"
+            # Добавляем отбивку между новостями (кроме последней)
+            if i < len(messages) - 1:
+                digest_lines.append("")
+        
+        # Добавляем случайный стильный эмодзи в конце
+        import random
+        style_emojis = ['🍿', '🎯', '🚀', '✨', '💡', '🔥', '⚡', '🌟', '💫', '🎪', '🎨', '🎭']
+        random_emoji = random.choice(style_emojis)
+        
+        digest_lines.append("")
+        digest_lines.append(random_emoji)
+        
+        digest_text = "\n".join(digest_lines)
+        
+        # Проверяем длину для Telegram (максимум 4096 символов)
+        if len(digest_text) > 4096:
+            logger.warning(f"⚠️ Дайджест слишком длинный ({len(digest_text)} символов), обрезаем...")
+            # Обрезаем сообщения, оставляя эмодзи
+            lines_without_emoji = digest_lines[:-2]
+            while len("\n".join(lines_without_emoji + ["", random_emoji])) > 4000:
+                lines_without_emoji.pop()
+            digest_text = "\n".join(lines_without_emoji + ["", random_emoji])
+        
+        logger.info(f"✅ Дайджест сформирован: {len(digest_text)} символов")
+        return digest_text
     
     async def validate_and_publish(self, digest: str, messages: List[Dict]) -> Dict[str, Any]:
-        """5.6. Валидация и публикация дайджеста"""
+        """Валидация и публикация дайджеста"""
         try:
             logger.info("🔍 Валидация дайджеста перед публикацией...")
             
@@ -426,7 +413,6 @@ class NewsCollector:
             
             if validation_errors:
                 logger.warning(f"⚠️ Найдены проблемы валидации: {'; '.join(validation_errors)}")
-                # Не блокируем публикацию, но логируем проблемы
             
             # Публикация в Telegram
             logger.info(f"📡 Публикуем дайджест в {self.target_channel}...")
@@ -470,7 +456,7 @@ class NewsCollector:
             }
     
     async def run_full_cycle(self) -> Dict[str, Any]:
-        """5.7. Полный цикл сбора, обработки и публикации новостей"""
+        """Полный цикл сбора, обработки и публикации новостей"""
         start_time = datetime.now()
         logger.info(f"🚀 Запуск полного цикла сбора новостей в {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
@@ -479,7 +465,7 @@ class NewsCollector:
             if not await self.initialize():
                 raise Exception("Ошибка инициализации")
             
-            # 5.2. Сбор новостей
+            # Сбор новостей
             collection_result = await self.collect_news()
             if not collection_result["success"]:
                 raise Exception(f"Ошибка сбора: {collection_result['error']}")
@@ -487,16 +473,16 @@ class NewsCollector:
             messages = collection_result["messages"]
             channels_processed = collection_result["channels_processed"]
             
-            # 5.3. Фильтрация и приоритизация
+            # Фильтрация и приоритизация
             filtered_messages = await self.filter_and_prioritize(messages)
             
-            # 5.4. Суммаризация
+            # Суммаризация
             summarized_messages = await self.summarize_messages(filtered_messages)
             
-            # 5.5. Форматирование
+            # Форматирование
             digest = self.format_digest(summarized_messages)
             
-            # 5.6. Валидация и публикация
+            # Валидация и публикация
             publish_result = await self.validate_and_publish(digest, summarized_messages)
             
             # Финальный результат
@@ -537,9 +523,12 @@ class NewsCollector:
             return result
             
         except Exception as e:
+            end_time = datetime.now()
+            execution_time = (end_time - start_time).total_seconds()
+            
             logger.error(f"❌ Ошибка полного цикла: {e}")
             
-            # Обновляем лог об ошибке
+            # Обновляем лог запуска с ошибкой
             self._update_run_log(
                 status="failed",
                 error_message=str(e)
@@ -547,8 +536,13 @@ class NewsCollector:
             
             return {
                 "success": False,
+                "execution_time": execution_time,
                 "error": str(e),
-                "execution_time": (datetime.now() - start_time).total_seconds()
+                "channels_processed": 0,
+                "messages_collected": 0,
+                "messages_filtered": 0,
+                "messages_summarized": 0,
+                "news_published": 0
             }
 
 # Основная функция для запуска из командной строки
