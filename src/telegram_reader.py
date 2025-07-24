@@ -55,8 +55,30 @@ class TelegramChannelReader:
             
             # Создаем клиент
             logger.info("🔗 Creating Telethon client...")
+            
+            # Проверяем наличие base64 сессии в переменных окружения
+            import os
+            import base64
+            session_base64 = os.getenv('TELEGRAM_SESSION_BASE64')
+            
+            if session_base64:
+                logger.info("🔑 Using session from base64 environment variable")
+                try:
+                    # Декодируем base64 и сохраняем во временный файл
+                    session_data = base64.b64decode(session_base64)
+                    session_file = 'temp_session.session'
+                    with open(session_file, 'wb') as f:
+                        f.write(session_data)
+                    logger.info("✅ Session file created from base64")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to decode base64 session: {e}")
+                    session_file = 'edu_digest_bot'
+            else:
+                logger.info("📁 Using default session file")
+                session_file = 'edu_digest_bot'
+            
             self.client = TelegramClient(
-                'edu_digest_bot', 
+                session_file, 
                 int(TELEGRAM_API_ID), 
                 TELEGRAM_API_HASH
             )
