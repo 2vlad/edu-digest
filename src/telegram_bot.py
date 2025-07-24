@@ -37,6 +37,7 @@ class TelegramBot:
             if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "your_bot_token":
                 raise ValueError("TELEGRAM_BOT_TOKEN не настроен в .env")
                 
+            # Create bot with proper configuration
             self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
             
             # Проверяем что бот работает
@@ -102,10 +103,11 @@ class TelegramBot:
                 logger.error("Бот не инициализирован")
                 return False
             
-            # Отправляем сообщение (временно без parse_mode для устранения ошибок)
+            # Отправляем сообщение с HTML разметкой для ссылок
             message = await self.bot.send_message(
                 chat_id=TARGET_CHANNEL,
                 text=digest_text,
+                parse_mode='HTML',
                 disable_web_page_preview=True
             )
             
@@ -187,7 +189,12 @@ _bot_instance = None
 async def get_telegram_bot() -> TelegramBot:
     """Получение инициализированного экземпляра бота"""
     global _bot_instance
-    if _bot_instance is None:
-        _bot_instance = TelegramBot()
-        await _bot_instance.initialize()
+    
+    # Always create a fresh instance to avoid event loop conflicts
+    if _bot_instance is not None:
+        logger.info("🔄 Creating fresh bot instance to prevent event loop conflicts...")
+        _bot_instance = None
+    
+    _bot_instance = TelegramBot()
+    await _bot_instance.initialize()
     return _bot_instance

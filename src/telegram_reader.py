@@ -101,15 +101,21 @@ class TelegramChannelReader:
                 logger.error("❌ Клиент не инициализирован")
                 return []
             
+            # Очищаем username от символа @ если он есть
+            clean_username = channel_username.lstrip('@')
+            logger.info(f"🔍 Поиск канала: {channel_username} -> {clean_username}")
+            
             # Получаем entity канала
             try:
-                entity = await self.client.get_entity(channel_username)
+                entity = await self.client.get_entity(clean_username)
+                logger.info(f"✅ Канал найден: {entity.title if hasattr(entity, 'title') else clean_username}")
             except Exception as e:
-                logger.error(f"❌ Не удалось найти канал {channel_username}: {e}")
+                logger.warning(f"⚠️ Не удалось найти канал {channel_username}: {e} - пропускаем")
                 return []
             
-            # Рассчитываем время отсечки
-            time_limit = datetime.now() - timedelta(hours=hours_lookback)
+            # Рассчитываем время отсечки с UTC timezone
+            from datetime import timezone
+            time_limit = datetime.now(timezone.utc) - timedelta(hours=hours_lookback)
             
             messages = []
             async for message in self.client.iter_messages(entity, limit=limit):
@@ -156,7 +162,7 @@ class TelegramChannelReader:
             return messages
             
         except Exception as e:
-            logger.error(f"❌ Ошибка получения сообщений из {channel_username}: {e}")
+            logger.warning(f"⚠️ Ошибка получения сообщений из {channel_username}: {e} - пропускаем канал")
             return []
     
     def _extract_links(self, text: str) -> List[str]:
@@ -178,11 +184,32 @@ async def get_telegram_reader() -> TelegramChannelReader:
     """Получение инициализированного экземпляра читателя каналов"""
     global _reader_instance
     
-    if _reader_instance is None:
-        _reader_instance = TelegramChannelReader()
-        if not await _reader_instance.initialize():
+    # Always create a fresh instance to avoid event loop conflicts
+    if _reader_instance is not None:
+        logger.info("🔄 Closing existing Telegram reader to prevent event loop conflicts...")
+        try:
+            await _reader_instance.close()
+        except:
+            pass
+        _reader_instance = None
+    
+    logger.info("🔧 Creating new Telegram reader instance...")
+    _reader_instance = TelegramChannelReader()
+    try:
+        logger.info("🔗 Initializing Telegram reader...")
+        init_result = await _reader_instance.initialize()
+        logger.info(f"📊 Initialization result: {init_result}")
+        if not init_result:
             logger.error("❌ Не удалось инициализировать Telegram reader")
+            _reader_instance = None
             return None
+    except Exception as e:
+        logger.error(f"❌ Exception during Telegram reader initialization: {e}")
+        logger.error(f"❌ Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        _reader_instance = None
+        return None
     
     return _reader_instance
 
@@ -194,9 +221,22 @@ async def test_channel_reading():
         print("❌ Не удалось создать reader")
         return
     
-    test_channels = ['@edtexno', '@vc_edtech', '@rusedweek']
+    # Получаем каналы из базы данных вместо хардкода
+    try:
+        from .database import ChannelsDB
+        channels = ChannelsDB().get_active_channels()
+        test_channels = [ch.get('username', '') for ch in channels[:3]]  # Первые 3 канала
+        if not test_channels:
+            print("❌ Нет активных каналов в базе данных")
+            return
+    except Exception as e:
+        print(f"❌ Ошибка получения каналов из БД: {e}")
+        print("💡 Используем пример реального канала...")
+        test_channels = ['@habr_career']  # Известный существующий канал
     
     for channel in test_channels:
+        if not channel:
+            continue
         print(f"\n📡 Тестируем канал {channel}...")
         messages = await reader.get_channel_messages(channel, limit=3, hours_lookback=24)
         

@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 """
-Task 6: Flask админ-панель для управления каналами
-Веб-интерфейс для управления EdTech News Digest Bot
-СТРОГО ТОЛЬКО SUPABASE MODE!
+Веб-интерфейс (админ-панель) для управления EdTech News Digest Bot
+ТОЛЬКО SUPABASE - БЕЗ SQLite FALLBACK
 """
 
 import os
-import sys
 import logging
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from typing import Dict, List, Any, Optional
 
-# Настройка детального логирования
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import session as flask_session
+
+# Настройка логирования
 os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('logs/admin_panel.log'),
+        logging.FileHandler('logs/admin.log'),
         logging.StreamHandler()
     ]
 )
@@ -25,99 +26,119 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.info("🚀 Starting Admin Panel - SUPABASE ONLY MODE")
 
-# Добавляем путь к модулям
-sys.path.append(os.path.dirname(__file__))
-
+# Импортируем конфигурацию и модули базы данных
 try:
-    # Попытка относительного импорта (при запуске через main.py)
     logger.info("📦 Attempting relative import...")
-    from .db_adapter import (ChannelsDB, ProcessedMessagesDB, SettingsDB, 
-                            create_connection, get_database_info)
-    from .config import FLASK_SECRET_KEY, FLASK_PORT
+    from .database import (
+        ChannelsDB, SettingsDB, ProcessedMessagesDB,
+        create_connection, test_db, init_database, get_database_info
+    )
+    from .config import FLASK_SECRET_KEY, FLASK_PORT, TARGET_CHANNEL
     logger.info("✅ Relative import successful")
-except ImportError as e:
-    # Абсолютный импорт (при прямом запуске)
-    logger.info(f"🔄 Relative import failed: {e}, trying absolute import...")
-    try:
-        from db_adapter import (ChannelsDB, ProcessedMessagesDB, SettingsDB, 
-                               create_connection, get_database_info)
-        from config import FLASK_SECRET_KEY, FLASK_PORT
-        logger.info("✅ Absolute import successful")
-    except ImportError as abs_error:
-        logger.error(f"❌ Both imports failed: relative={e}, absolute={abs_error}")
-        raise
+except ImportError:
+    logger.info("📦 Falling back to absolute import...")
+    from database import (
+        ChannelsDB, SettingsDB, ProcessedMessagesDB,
+        create_connection, test_db, init_database, get_database_info
+    )
+    from config import FLASK_SECRET_KEY, FLASK_PORT, TARGET_CHANNEL
+    logger.info("✅ Absolute import successful")
 
 # Инициализация Flask приложения
 logger.info("🌐 Initializing Flask application...")
-template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates')
-logger.info(f"📁 Template directory: {template_dir}")
-app = Flask(__name__, template_folder=template_dir)
+app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
+
+# Настройка папки с шаблонами
+template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates')
+app.template_folder = template_dir
+logger.info(f"📁 Template directory: {template_dir}")
 logger.info("✅ Flask app initialized")
 
-# Конфигурация базы данных
+# Получаем информацию о базе данных
 logger.info("🔍 Getting database information...")
 db_info = get_database_info()
-app.config['DATABASE_INFO'] = db_info
 logger.info(f"🗄️ Database configuration: {db_info}")
 print(f"🗄️ Database configuration: {db_info['type']}")
 
-# Функции для работы с данными
 def get_db():
     """Получение подключения к базе данных"""
     return create_connection()
 
-def get_run_logs(limit=20):
-    """Получение логов запусков"""
-    conn = get_db()
-    cursor = conn.cursor()
+def get_dashboard_stats_rest_api():
+    """Получение статистики через REST API (fallback)"""
+    logger.info("📡 Getting dashboard statistics via REST API...")
+    
     try:
-        cursor.execute('''
-            SELECT * FROM run_logs 
-            ORDER BY started_at DESC 
-            LIMIT ?
-        ''', (limit,))
-        logs = [dict(row) for row in cursor.fetchall()]
-        return logs
-    finally:
-        conn.close()
+        from .database import supabase_db
+        
+        # Получаем каналы
+        channels = supabase_db.execute_rest_query('channels', 'GET')
+        active_channels = len([c for c in channels if c.get('is_active', True)])
+        total_channels = len(channels)
+        
+        # Обработанные сообщения (пока заглушка, так как сложный запрос)
+        try:
+            messages = supabase_db.execute_rest_query('processed_messages', 'GET')
+            recent_messages = len(messages)  # Упрощенно - все сообщения
+        except:
+            recent_messages = 0
+        
+        # Настройки (заглушка)
+        published_news = 0
+        last_run = None
+        
+        stats = {
+            'active_channels': active_channels,
+            'total_channels': total_channels,
+            'recent_messages': recent_messages,
+            'published_news': published_news,
+            'last_run': last_run
+        }
+        
+        logger.info(f"✅ REST API statistics: active={active_channels}, total={total_channels}")
+        return stats
+        
+    except Exception as e:
+        logger.error(f"❌ REST API fallback failed: {e}")
+        return {
+            'active_channels': 0,
+            'total_channels': 0,
+            'recent_messages': 0,
+            'published_news': 0,
+            'last_run': None,
+            'error': f'REST API error: {str(e)}'
+        }
 
 def get_dashboard_stats():
     """Получение статистики для дашборда"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
     logger.info("📊 Getting dashboard statistics...")
     
     conn = None
     try:
         logger.info("🔗 Getting database connection...")
         conn = get_db()
+        
+        if conn is None:
+            logger.warning("⚠️ PostgreSQL connection unavailable, using REST API fallback...")
+            return get_dashboard_stats_rest_api()
+            
         cursor = conn.cursor()
         logger.info("✅ Database connection established")
         
         # Проверяем существование таблиц
         logger.info("🔍 Checking if tables exist...")
-        
-        if USE_SUPABASE:
-            # PostgreSQL запрос
-            cursor.execute("""
-                SELECT table_name FROM information_schema.tables 
-                WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            """)
-            tables = [row['table_name'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
-        else:
-            # SQLite запрос
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = [row[0] for row in cursor.fetchall()]
-            
+        cursor.execute("""
+            SELECT table_name FROM information_schema.tables 
+            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+        """)
+        tables = [row['table_name'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
         logger.info(f"📋 Available tables: {tables}")
         
         if 'channels' not in tables:
             logger.error("❌ Table 'channels' does not exist!")
             # Пытаемся создать таблицы
             try:
-                from .db_adapter import init_database
                 logger.info("⚡ Attempting to create missing tables...")
                 init_database()
                 logger.info("✅ Tables created successfully")
@@ -127,107 +148,69 @@ def get_dashboard_stats():
         
         # Общее количество каналов
         logger.info("📈 Querying active channels count...")
-        if USE_SUPABASE:
-            cursor.execute('SELECT COUNT(*) FROM channels WHERE is_active = true')
-            active_channels = cursor.fetchone()['count']
-            
-            cursor.execute('SELECT COUNT(*) FROM channels')
-            total_channels = cursor.fetchone()['count']
-        else:
-            cursor.execute('SELECT COUNT(*) FROM channels WHERE is_active = 1')
-            active_channels = cursor.fetchone()[0]
-            
-            cursor.execute('SELECT COUNT(*) FROM channels')
-            total_channels = cursor.fetchone()[0]
-            
-        logger.info(f"✅ Active channels: {active_channels}")
-        logger.info(f"✅ Total channels: {total_channels}")
+        cursor.execute('SELECT COUNT(*) FROM channels WHERE is_active = true')
+        result = cursor.fetchone()
+        active_channels = result['count'] if isinstance(result, dict) else result[0]
         
-        # Статистика за последние 24 часа
-        yesterday = datetime.now() - timedelta(hours=24)
+        # Общее количество каналов
+        cursor.execute('SELECT COUNT(*) FROM channels')
+        result = cursor.fetchone()
+        total_channels = result['count'] if isinstance(result, dict) else result[0]
         
-        if USE_SUPABASE:
-            cursor.execute('''
-                SELECT COUNT(*) FROM run_logs 
-                WHERE started_at > %s AND status = 'completed'
-            ''', (yesterday.isoformat(),))
-            successful_runs = cursor.fetchone()['count']
-            
-            cursor.execute('''
-                SELECT SUM(news_published) FROM run_logs 
-                WHERE started_at > %s AND status = 'completed'
-            ''', (yesterday.isoformat(),))
-            result = cursor.fetchone()
-            news_published_24h = result['sum'] if result and result['sum'] else 0
-            
-            cursor.execute('''
-                SELECT SUM(messages_collected) FROM run_logs 
-                WHERE started_at > %s AND status = 'completed'
-            ''', (yesterday.isoformat(),))
-            result = cursor.fetchone()
-            messages_collected_24h = result['sum'] if result and result['sum'] else 0
-        else:
-            cursor.execute('''
-                SELECT COUNT(*) FROM run_logs 
-                WHERE started_at > ? AND status = 'completed'
-            ''', (yesterday.isoformat(),))
-            successful_runs = cursor.fetchone()[0]
-            
-            cursor.execute('''
-                SELECT SUM(news_published) FROM run_logs 
-                WHERE started_at > ? AND status = 'completed'
-            ''', (yesterday.isoformat(),))
-            news_published_24h = cursor.fetchone()[0] or 0
-            
-            cursor.execute('''
-                SELECT SUM(messages_collected) FROM run_logs 
-                WHERE started_at > ? AND status = 'completed'
-            ''', (yesterday.isoformat(),))
-            messages_collected_24h = cursor.fetchone()[0] or 0
+        # Количество обработанных сообщений за последние 24 часа
+        cursor.execute('''
+            SELECT COUNT(*) FROM processed_messages 
+            WHERE processed_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
+        ''')
+        result = cursor.fetchone()
+        recent_messages = result['count'] if isinstance(result, dict) else result[0]
+        
+        # Количество опубликованных новостей за последние 24 часа
+        cursor.execute('''
+            SELECT COUNT(*) FROM processed_messages 
+            WHERE published = true AND processed_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
+        ''')
+        result = cursor.fetchone()
+        published_news = result['count'] if isinstance(result, dict) else result[0]
         
         # Последний запуск
-        cursor.execute('''
-            SELECT * FROM run_logs 
-            ORDER BY started_at DESC 
-            LIMIT 1
-        ''')
+        cursor.execute('SELECT * FROM run_logs ORDER BY started_at DESC LIMIT 1')
         last_run = cursor.fetchone()
-        last_run = dict(last_run) if last_run else None
         
-        return {
+        stats = {
             'active_channels': active_channels,
             'total_channels': total_channels,
-            'successful_runs_24h': successful_runs,
-            'news_published_24h': news_published_24h,
-            'messages_collected_24h': messages_collected_24h,
-            'last_run': last_run
+            'recent_messages': recent_messages,
+            'published_news': published_news,
+            'last_run': dict(last_run) if last_run else None
         }
-    finally:
-        if conn:
-            conn.close()
+        
+        logger.info(f"📊 Dashboard stats: {stats}")
+        return stats
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting dashboard stats: {e}")
+        import traceback
+        logger.error(f"📋 Traceback: {traceback.format_exc()}")
+        return {
+            'active_channels': 0,
+            'total_channels': 0,
+            'recent_messages': 0,
+            'published_news': 0,
+            'last_run': None,
+            'error': str(e)
+        }
 
 # Маршруты (Routes)
 
 @app.route('/')
 def dashboard():
     """Главная страница - дашборд"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
     logger.info("🌐 Dashboard route accessed")
     
     # Обеспечиваем инициализацию БД при первом доступе
     try:
         logger.info("📦 Setting up database connection...")
-        
-        # Импортируем необходимые функции из адаптера
-        try:
-            from .db_adapter import init_database, test_db
-            logger.info("✅ Database adapter imported via relative import")
-        except ImportError:
-            from db_adapter import init_database, test_db
-            logger.info("✅ Database adapter imported via absolute import")
-        
         logger.info(f"🗄️ Database type: {db_info['type']}")
             
         # Проверяем состояние БД
@@ -250,361 +233,234 @@ def dashboard():
     
     # Получаем статистику
     try:
-        logger.info("📊 Getting dashboard stats...")
+        logger.info("📊 Getting dashboard statistics...")
         stats = get_dashboard_stats()
-        logger.info(f"✅ Stats retrieved: {stats}")
+        logger.info("✅ Dashboard statistics retrieved")
     except Exception as e:
-        logger.error(f"❌ Error getting stats: {e}")
-        # Fallback stats
+        logger.error(f"❌ Error getting dashboard stats: {e}")
         stats = {
             'active_channels': 0,
             'total_channels': 0,
-            'successful_runs_24h': 0,
-            'news_published_24h': 0,
-            'messages_collected_24h': 0,
-            'last_run': None
+            'recent_messages': 0,
+            'published_news': 0,
+            'last_run': None,
+            'error': str(e)
         }
     
-    # Получаем логи
+    # Получаем топ каналы
     try:
-        logger.info("📜 Getting recent logs...")
-        recent_logs = get_run_logs(10)
-        logger.info(f"✅ Retrieved {len(recent_logs)} log entries")
+        logger.info("📺 Getting top channels...")
+        channels = ChannelsDB.get_active_channels()[:5]  # Топ 5 каналов
+        logger.info(f"✅ Retrieved {len(channels)} top channels")
     except Exception as e:
-        logger.error(f"❌ Error getting logs: {e}")
-        recent_logs = []
+        logger.error(f"❌ Error getting channels: {e}")
+        channels = []
     
-    logger.info("🎨 Rendering template...")
-    return render_template('dashboard.html', 
-                         stats=stats, 
-                         recent_logs=recent_logs,
-                         title="Дашборд")
+    # Получаем последние настройки
+    try:
+        logger.info("⚙️ Getting current settings...")
+        current_settings = {
+            'max_news_count': SettingsDB.get_setting('max_news_count', '10'),
+            'target_channel': SettingsDB.get_setting('target_channel', TARGET_CHANNEL),
+            'digest_times': SettingsDB.get_setting('digest_times', '12:00,18:00'),
+            'hours_lookback': SettingsDB.get_setting('hours_lookback', '12')
+        }
+        logger.info("✅ Current settings retrieved")
+    except Exception as e:
+        logger.error(f"❌ Error getting settings: {e}")
+        current_settings = {
+            'max_news_count': '10',
+            'target_channel': TARGET_CHANNEL,
+            'digest_times': '12:00,18:00',
+            'hours_lookback': '12'
+        }
+    
+    logger.info("✅ Dashboard data prepared, rendering template")
+    
+    return render_template('dashboard.html',
+                         stats=stats,
+                         channels=channels,
+                         settings=current_settings,
+                         db_info=db_info)
 
 @app.route('/channels')
 def channels():
     """Страница управления каналами"""
-    channels_list = ChannelsDB.get_active_channels()
-    
-    # Добавляем статистику по каналам
-    for channel in channels_list:
-        conn = get_db()
-        cursor = conn.cursor()
-        try:
-            # Количество обработанных сообщений за последние 7 дней
-            week_ago = datetime.now() - timedelta(days=7)
-            cursor.execute('''
-                SELECT COUNT(*) FROM processed_messages 
-                WHERE channel_id = ? AND processed_at > ?
-            ''', (channel['id'], week_ago.isoformat()))
-            channel['messages_7d'] = cursor.fetchone()[0]
-            
-            # Последнее обработанное сообщение
-            cursor.execute('''
-                SELECT processed_at FROM processed_messages 
-                WHERE channel_id = ? 
-                ORDER BY processed_at DESC 
-                LIMIT 1
-            ''', (channel['id'],))
-            last_message = cursor.fetchone()
-            channel['last_message_date'] = last_message[0] if last_message else None
-            
-        finally:
-            conn.close()
-    
-    return render_template('channels.html', 
-                         channels=channels_list,
-                         title="Управление каналами")
-
-@app.route('/channels/add', methods=['GET', 'POST'])
-def add_channel():
-    """Добавление нового канала"""
-    if request.method == 'POST':
-        username = request.form['username'].strip()
-        display_name = request.form['display_name'].strip()
-        priority = int(request.form['priority'])
-        
-        # Валидация
-        if not username.startswith('@'):
-            username = '@' + username
-        
-        if not username or not display_name:
-            flash('Заполните все обязательные поля', 'error')
-            return render_template('add_channel.html', title="Добавить канал")
-        
-        if not (0 <= priority <= 10):
-            flash('Приоритет должен быть от 0 до 10', 'error')
-            return render_template('add_channel.html', title="Добавить канал")
-        
-        try:
-            channel_id = ChannelsDB.add_channel(username, display_name, priority)
-            flash(f'Канал {display_name} успешно добавлен (ID: {channel_id})', 'success')
-            return redirect(url_for('channels'))
-        except Exception as e:
-            if "уже существует" in str(e):
-                flash(f'Канал {username} уже существует', 'error')
-            else:
-                flash(f'Ошибка добавления канала: {str(e)}', 'error')
-    
-    return render_template('add_channel.html', title="Добавить канал")
-
-@app.route('/channels/<int:channel_id>/edit', methods=['GET', 'POST'])
-def edit_channel(channel_id):
-    """Редактирование канала"""
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    if request.method == 'POST':
-        display_name = request.form['display_name'].strip()
-        priority = int(request.form['priority'])
-        is_active = 'is_active' in request.form
-        
-        if not display_name:
-            flash('Название канала не может быть пустым', 'error')
-        elif not (0 <= priority <= 10):
-            flash('Приоритет должен быть от 0 до 10', 'error')
-        else:
-            try:
-                cursor.execute('''
-                    UPDATE channels 
-                    SET display_name = ?, priority = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                ''', (display_name, priority, is_active, channel_id))
-                conn.commit()
-                flash('Канал успешно обновлен', 'success')
-                return redirect(url_for('channels'))
-            except Exception as e:
-                flash(f'Ошибка обновления канала: {str(e)}', 'error')
-    
-    # Получаем данные канала
-    cursor.execute('SELECT * FROM channels WHERE id = ?', (channel_id,))
-    channel = cursor.fetchone()
-    conn.close()
-    
-    if not channel:
-        flash('Канал не найден', 'error')
-        return redirect(url_for('channels'))
-    
-    return render_template('edit_channel.html', 
-                         channel=dict(channel),
-                         title=f"Редактировать {channel['display_name']}")
-
-@app.route('/channels/<int:channel_id>/delete', methods=['POST'])
-def delete_channel(channel_id):
-    """Удаление канала"""
-    conn = get_db()
-    cursor = conn.cursor()
+    logger.info("📺 Channels page accessed")
     
     try:
-        # Получаем информацию о канале
-        cursor.execute('SELECT display_name FROM channels WHERE id = ?', (channel_id,))
-        channel = cursor.fetchone()
-        
-        if not channel:
-            flash('Канал не найден', 'error')
-        else:
-            # Удаляем канал и связанные данные
-            cursor.execute('DELETE FROM processed_messages WHERE channel_id = ?', (channel_id,))
-            cursor.execute('DELETE FROM channels WHERE id = ?', (channel_id,))
-            conn.commit()
-            
-            flash(f'Канал "{channel[0]}" успешно удален', 'success')
-    
+        channels_list = ChannelsDB.get_active_channels()
+        logger.info(f"✅ Retrieved {len(channels_list)} channels")
     except Exception as e:
-        flash(f'Ошибка удаления канала: {str(e)}', 'error')
-    finally:
-        conn.close()
+        logger.error(f"❌ Error getting channels: {e}")
+        channels_list = []
+        flash(f'Ошибка получения каналов: {e}', 'error')
+    
+    return render_template('channels.html', channels=channels_list)
+
+@app.route('/channels/add')
+def add_channel_form():
+    """Страница формы добавления канала"""
+    logger.info("➕ Add channel form accessed")
+    return render_template('add_channel.html')
+
+@app.route('/add_channel', methods=['POST'])
+def add_channel():
+    """Добавление нового канала"""
+    logger.info("➕ Add channel request received")
+    
+    username = request.form.get('username', '').strip()
+    display_name = request.form.get('display_name', '').strip()
+    priority = request.form.get('priority', 0, type=int)
+    
+    logger.info(f"📋 Channel data: {username}, {display_name}, priority={priority}")
+    
+    if not username:
+        flash('Имя канала обязательно', 'error')
+        return redirect(url_for('channels'))
+    
+    # Добавляем @ если отсутствует
+    if not username.startswith('@'):
+        username = '@' + username
+    
+    try:
+        channel_id = ChannelsDB.add_channel(username, display_name, priority)
+        flash(f'Канал {username} успешно добавлен (ID: {channel_id})', 'success')
+        logger.info(f"✅ Channel {username} added successfully with ID {channel_id}")
+    except ValueError as e:
+        flash(str(e), 'error')
+        logger.warning(f"⚠️ Channel addition failed: {e}")
+    except Exception as e:
+        flash(f'Ошибка добавления канала: {e}', 'error')
+        logger.error(f"❌ Channel addition error: {e}")
+    
+    return redirect(url_for('channels'))
+
+@app.route('/test')
+def test_route():
+    """Тестовый роут для проверки"""
+    return "Test route works!"
+
+@app.route('/channels/<int:channel_id>/delete', methods=['POST', 'GET'])
+def delete_channel(channel_id):
+    """Удаление канала"""
+    logger.info(f"🗑️ Delete channel request received for ID: {channel_id}")
+    
+    try:
+        # Удаляем канал через REST API или PostgreSQL
+        result = ChannelsDB.delete_channel(channel_id)
+        if result:
+            flash('Канал успешно удален', 'success')
+            logger.info(f"✅ Channel {channel_id} deleted successfully")
+        else:
+            flash('Ошибка удаления канала', 'error')
+            logger.error(f"❌ Failed to delete channel {channel_id}")
+    except Exception as e:
+        flash(f'Ошибка удаления канала: {e}', 'error')
+        logger.error(f"❌ Channel deletion error: {e}")
+    
+    return redirect(url_for('channels'))
+
+@app.route('/channels/<int:channel_id>/toggle', methods=['POST', 'GET'])
+def toggle_channel(channel_id):
+    """Включение/выключение канала"""
+    logger.info(f"🔄 Toggle channel request received for ID: {channel_id}")
+    
+    try:
+        # Переключаем статус канала
+        result = ChannelsDB.toggle_channel_status(channel_id)
+        if result:
+            flash('Статус канала изменен', 'success')
+            logger.info(f"✅ Channel {channel_id} status toggled successfully")
+        else:
+            flash('Ошибка изменения статуса канала', 'error')
+            logger.error(f"❌ Failed to toggle channel {channel_id}")
+    except Exception as e:
+        flash(f'Ошибка изменения статуса: {e}', 'error')
+        logger.error(f"❌ Channel toggle error: {e}")
     
     return redirect(url_for('channels'))
 
 @app.route('/settings')
 def settings():
-    """Страница настроек системы"""
-    # Получаем все настройки
-    conn = get_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute('SELECT * FROM settings ORDER BY key')
-        settings_list = [dict(row) for row in cursor.fetchall()]
-    finally:
-        conn.close()
+    """Страница настроек"""
+    logger.info("⚙️ Settings page accessed")
     
-    return render_template('settings.html', 
-                         settings=settings_list,
-                         title="Настройки системы")
+    try:
+        current_settings = {
+            'max_news_count': SettingsDB.get_setting('max_news_count', '10'),
+            'target_channel': SettingsDB.get_setting('target_channel', TARGET_CHANNEL),
+            'digest_times': SettingsDB.get_setting('digest_times', '12:00,18:00'),
+            'hours_lookback': SettingsDB.get_setting('hours_lookback', '12'),
+            'summary_max_length': SettingsDB.get_setting('summary_max_length', '150')
+        }
+        logger.info("✅ Current settings retrieved")
+    except Exception as e:
+        logger.error(f"❌ Error getting settings: {e}")
+        current_settings = {}
+        flash(f'Ошибка получения настроек: {e}', 'error')
+    
+    return render_template('settings.html', settings=current_settings)
 
-@app.route('/settings/update', methods=['POST'])
+@app.route('/update_settings', methods=['POST'])
 def update_settings():
     """Обновление настроек"""
+    logger.info("🔧 Update settings request received")
+    
     try:
-        for key, value in request.form.items():
-            if key.startswith('setting_'):
-                setting_key = key.replace('setting_', '')
-                
-                # Валидация некоторых настроек
-                if setting_key == 'max_news_count':
-                    if not (1 <= int(value) <= 50):
-                        flash('Количество новостей должно быть от 1 до 50', 'error')
-                        return redirect(url_for('settings'))
-                
-                elif setting_key == 'hours_lookback':
-                    if not (1 <= int(value) <= 168):  # До недели
-                        flash('Период поиска должен быть от 1 до 168 часов', 'error')
-                        return redirect(url_for('settings'))
-                
-                SettingsDB.set_setting(setting_key, value)
+        # Получаем данные из формы
+        max_news_count = request.form.get('max_news_count', '10')
+        target_channel = request.form.get('target_channel', TARGET_CHANNEL)
+        digest_times = request.form.get('digest_times', '12:00,18:00')
+        hours_lookback = request.form.get('hours_lookback', '12')
+        summary_max_length = request.form.get('summary_max_length', '150')
+        
+        # Обновляем настройки
+        SettingsDB.set_setting('max_news_count', max_news_count, 'Максимальное количество новостей в дайджесте')
+        SettingsDB.set_setting('target_channel', target_channel, 'Целевой канал для публикации')
+        SettingsDB.set_setting('digest_times', digest_times, 'Время публикации дайджестов')
+        SettingsDB.set_setting('hours_lookback', hours_lookback, 'Сколько часов назад искать новости')
+        SettingsDB.set_setting('summary_max_length', summary_max_length, 'Максимальная длина суммаризации')
         
         flash('Настройки успешно обновлены', 'success')
+        logger.info("✅ Settings updated successfully")
         
     except Exception as e:
-        flash(f'Ошибка обновления настроек: {str(e)}', 'error')
+        flash(f'Ошибка обновления настроек: {e}', 'error')
+        logger.error(f"❌ Settings update error: {e}")
     
     return redirect(url_for('settings'))
 
 @app.route('/logs')
 def logs():
-    """Страница логов запусков"""
-    page = request.args.get('page', 1, type=int)
-    per_page = 20
-    
-    conn = get_db()
-    cursor = conn.cursor()
-    try:
-        # Общее количество записей
-        cursor.execute('SELECT COUNT(*) FROM run_logs')
-        total_logs = cursor.fetchone()[0]
-        
-        # Получаем логи с пагинацией
-        offset = (page - 1) * per_page
-        cursor.execute('''
-            SELECT * FROM run_logs 
-            ORDER BY started_at DESC 
-            LIMIT ? OFFSET ?
-        ''', (per_page, offset))
-        
-        logs = [dict(row) for row in cursor.fetchall()]
-        
-        # Рассчитываем пагинацию
-        total_pages = (total_logs + per_page - 1) // per_page
-        has_prev = page > 1
-        has_next = page < total_pages
-        
-    finally:
-        conn.close()
-    
-    return render_template('logs.html',
-                         logs=logs,
-                         page=page,
-                         total_pages=total_pages,
-                         has_prev=has_prev,
-                         has_next=has_next,
-                         title="Логи запусков")
-
-@app.route('/run-collect', methods=['POST'])
-def run_collect():
-    """Запуск сбора новостей из админки"""
-    import logging
-    import asyncio
-    import signal
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-    
-    logger = logging.getLogger(__name__)
-    
-    def timeout_handler(signum, frame):
-        raise TimeoutError("Operation timed out")
+    """Страница логов"""
+    logger.info("📋 Logs page accessed")
     
     try:
-        logger.info("🚀 Начинаем запуск сбора новостей из админки...")
-        
-        # Проверяем наличие необходимых переменных окружения
-        required_env_vars = ['TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'TELEGRAM_BOT_TOKEN', 'ANTHROPIC_API_KEY']
-        missing_vars = []
-        
-        for var in required_env_vars:
-            if not os.getenv(var):
-                missing_vars.append(var)
-        
-        if missing_vars:
-            error_msg = f'Отсутствуют переменные окружения: {", ".join(missing_vars)}'
-            logger.error(error_msg)
-            flash(error_msg, 'error')
-            return redirect(url_for('dashboard'))
-        
-        logger.info("✅ Все переменные окружения найдены")
-        
-        try:
-            from .news_collector import NewsCollector
-            logger.info("✅ NewsCollector импортирован через относительный импорт")
-        except ImportError:
-            from news_collector import NewsCollector
-            logger.info("✅ NewsCollector импортирован через абсолютный импорт")
-        
-        logger.info("🔄 Создаем NewsCollector и запускаем полный цикл...")
-        
-        # Создаем функцию для выполнения в отдельном потоке
-        def run_news_collection():
-            try:
-                collector = NewsCollector()
-                # Создаем новый цикл событий для этого потока
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    result = loop.run_until_complete(collector.run_full_cycle())
-                    return result
-                finally:
-                    loop.close()
-            except Exception as e:
-                logger.error(f"❌ Ошибка в run_news_collection: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                return {"success": False, "error": str(e)}
-        
-        # Запускаем с таймаутом 5 минут
-        logger.info("⏳ Запускаем сбор новостей с таймаутом 5 минут...")
-        
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_news_collection)
-            try:
-                result = future.result(timeout=300)  # 5 минут
-                logger.info(f"📊 Результат выполнения: {result}")
-            except FuturesTimeoutError:
-                logger.error("❌ Таймаут: сбор новостей занял более 5 минут")
-                future.cancel()
-                flash('Таймаут: сбор новостей занял слишком много времени. Попробуйте позже.', 'error')
-                return redirect(url_for('dashboard'))
-        
-        if result.get('success'):
-            success_msg = (f'Сбор новостей завершен успешно! '
-                          f'Обработано: {result.get("channels_processed", 0)} каналов, '
-                          f'опубликовано: {result.get("news_published", 0)} новостей')
-            logger.info(f"✅ {success_msg}")
-            flash(success_msg, 'success')
+        conn = get_db()
+        if conn is None:
+            logger.warning("⚠️ PostgreSQL недоступен для получения логов")
+            run_logs = []
+            flash('База данных недоступна. Логи не могут быть загружены.', 'warning')
         else:
-            error_msg = f'Ошибка сбора новостей: {result.get("error", "Неизвестная ошибка")}'
-            logger.error(f"❌ {error_msg}")
-            flash(error_msg, 'error')
-    
+            cursor = conn.cursor()
+            
+            # Получаем последние запуски
+            cursor.execute('''
+                SELECT * FROM run_logs 
+                ORDER BY started_at DESC 
+                LIMIT 50
+            ''')
+            run_logs = [dict(row) for row in cursor.fetchall()]
+            
+            logger.info(f"✅ Retrieved {len(run_logs)} log entries")
+        
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        error_msg = f'Ошибка запуска сбора: {str(e)}'
-        logger.error(f"❌ {error_msg}")
-        logger.error(f"📋 Полная трассировка:\n{error_details}")
-        flash(error_msg, 'error')
+        logger.error(f"❌ Error getting logs: {e}")
+        run_logs = []
+        flash(f'Ошибка получения логов: {e}', 'error')
     
-    return redirect(url_for('dashboard'))
-
-# API endpoints для AJAX запросов
-@app.route('/api/stats')
-def api_stats():
-    """API для получения статистики"""
-    stats = get_dashboard_stats()
-    return jsonify(stats)
-
-@app.route('/api/channels')
-def api_channels():
-    """API для получения списка каналов"""
-    channels_list = ChannelsDB.get_active_channels()
-    return jsonify(channels_list)
+    return render_template('logs.html', logs=run_logs)
 
 # Health check endpoint для Railway
 @app.route('/health')
@@ -627,110 +483,90 @@ def health():
         # Пробуем подключиться к БД для проверки
         try:
             conn = get_db()
-            if USE_SUPABASE:
-                # PostgreSQL проверка
+            if conn is None:
+                # Используем REST API fallback
+                from .database import supabase_db
+                channels_data = supabase_db.execute_rest_query('channels', 'GET')
+                channels_count = len(channels_data) if channels_data else 0
+            else:
                 cursor = conn.cursor()
                 cursor.execute('SELECT COUNT(*) FROM channels')
                 result = cursor.fetchone()
                 channels_count = result['count'] if isinstance(result, dict) else result[0]
-            else:
-                # SQLite проверка
-                cursor = conn.cursor()
-                cursor.execute('SELECT COUNT(*) FROM channels')
-                channels_count = cursor.fetchone()[0]
-                conn.close()
             
             basic_info.update({
                 'database': 'connected',
+                'database_exists': True,
                 'channels_count': channels_count
             })
             
         except Exception as db_error:
             basic_info.update({
                 'database': f'error: {str(db_error)}',
+                'database_exists': False,
                 'channels_count': 0
             })
         
         return jsonify(basic_info)
-    
+        
     except Exception as e:
-        # Минимальный error response чтобы не крашить health check
         return jsonify({
             'status': 'error',
             'error': str(e),
             'timestamp': datetime.now().isoformat()
-        }), 200  # Возвращаем 200, чтобы не вызвать рестарт
+        }), 500
 
-# Создание HTML шаблонов
-def create_templates():
-    """Создание директории и HTML шаблонов"""
-    template_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
-    os.makedirs(template_dir, exist_ok=True)
+@app.route('/run-collect', methods=['GET', 'POST'])
+def run_collect():
+    """Запуск сбора новостей"""
+    logger.info("🚀 Запуск сбора новостей из админ-панели...")
     
-    # Base template
-    base_template = '''<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}EdTech News Digest - Админ-панель{% endblock %}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container">
-            <a class="navbar-brand" href="/">
-                <i class="fas fa-robot"></i> EdTech News Bot
-            </a>
-            <div class="navbar-nav ms-auto">
-                <a class="nav-link" href="/"><i class="fas fa-tachometer-alt"></i> Дашборд</a>
-                <a class="nav-link" href="/channels"><i class="fas fa-list"></i> Каналы</a>
-                <a class="nav-link" href="/settings"><i class="fas fa-cog"></i> Настройки</a>
-                <a class="nav-link" href="/logs"><i class="fas fa-file-text"></i> Логи</a>
-            </div>
-        </div>
-    </nav>
-    
-    <div class="container mt-4">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+    try:
+        import asyncio
+        import sys
+        import os
         
-        {% block content %}{% endblock %}
-    </div>
+        # Добавляем путь к main.py
+        main_path = os.path.join(os.path.dirname(os.path.dirname(__file__)))
+        if main_path not in sys.path:
+            sys.path.append(main_path)
+        
+        # Импортируем функцию из main.py
+        from main import run_collect as main_run_collect
+        
+        # Запускаем сбор новостей
+        logger.info("🔄 Запуск асинхронной функции сбора новостей...")
+        
+        # Создаем новый event loop для асинхронного выполнения
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            result_code = loop.run_until_complete(main_run_collect())
+            
+            if result_code == 0:
+                flash("✅ Сбор новостей завершен успешно!", "success")
+                logger.info("✅ Сбор новостей завершен успешно")
+            else:
+                flash("❌ Ошибка при сборе новостей. Проверьте логи.", "error")
+                logger.error("❌ Сбор новостей завершился с ошибкой")
+                
+        finally:
+            loop.close()
+        
+    except ImportError as ie:
+        error_msg = f"Ошибка импорта: {str(ie)}"
+        logger.error(f"❌ {error_msg}")
+        flash(f"❌ {error_msg}", "error")
+        
+    except Exception as e:
+        error_msg = f"Ошибка запуска сбора новостей: {str(e)}"
+        logger.error(f"❌ {error_msg}")
+        flash(f"❌ {error_msg}", "error")
     
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    {% block scripts %}{% endblock %}
-</body>
-</html>'''
-    
-    with open(os.path.join(template_dir, 'base.html'), 'w', encoding='utf-8') as f:
-        f.write(base_template)
+    # Возвращаемся на главную страницу
+    return redirect(url_for('dashboard'))
 
-# Инициализация при импорте
 if __name__ == '__main__':
-    # Создаем шаблоны если их нет
-    create_templates()
-    
-    print("🌐 Flask админ-панель запущена!")
-    print(f"📍 Адрес: http://localhost:{FLASK_PORT}")
-    print("🔧 Доступные функции:")
-    print("   - Управление каналами (добавление, редактирование, удаление)")
-    print("   - Настройки системы")
-    print("   - Просмотр логов запусков")
-    print("   - Запуск сбора новостей")
-    print("   - API endpoints")
-    print("   - Health check")
-    
-    app.run(host='0.0.0.0', port=FLASK_PORT, debug=False)
-else:
-    # При импорте создаем шаблоны
-    create_templates()
+    logger.info(f"🚀 Starting Flask development server on port {FLASK_PORT}")
+    app.run(host='0.0.0.0', port=FLASK_PORT, debug=True)

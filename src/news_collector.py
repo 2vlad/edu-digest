@@ -259,46 +259,89 @@ class NewsCollector:
         
         return final_messages
     
-    async def summarize_messages(self, messages: List[Dict]) -> List[Dict]:
-        """Суммаризация сообщений с помощью Claude AI"""
+    async def evaluate_and_summarize_messages(self, messages: List[Dict]) -> List[Dict]:
+        """Оценка релевантности и суммаризация сообщений с помощью Claude AI"""
         if not messages:
-            logger.warning("⚠️ Нет сообщений для суммаризации")
+            logger.warning("⚠️ Нет сообщений для обработки")
             return []
         
-        logger.info(f"🤖 Суммаризация {len(messages)} сообщений...")
+        logger.info(f"🤖 Оценка релевантности и суммаризация {len(messages)} сообщений...")
         
-        summarized_messages = []
+        processed_messages = []
         
         for msg in messages:
             try:
-                # Суммаризируем текст сообщения
+                # Сначала оцениваем релевантность
                 if self.claude_summarizer:
-                    result = await self.claude_summarizer.summarize_message(
+                    relevance_result = await self.claude_summarizer.evaluate_relevance(
                         msg['text'], 
                         msg.get('channel_display', msg.get('channel', ''))
                     )
-                    if result['success']:
-                        msg['summary'] = result['summary']
-                        msg['summary_quality'] = result.get('quality_score', 8)
+                    
+                    relevance_score = relevance_result.get('relevance_score', 5)
+                    msg['relevance_score'] = relevance_score
+                    
+                    # Фильтруем новости с оценкой меньше 5
+                    if relevance_score < 5:
+                        logger.info(f"🚫 Пропускаем новость (релевантность: {relevance_score}/10): {msg['text'][:50]}...")
+                        continue
+                    
+                    logger.info(f"✅ Новость релевантна ({relevance_score}/10): {msg['text'][:50]}...")
+                    
+                    # Суммаризируем только релевантные новости
+                    summary_result = await self.claude_summarizer.summarize_message(
+                        msg['text'], 
+                        msg.get('channel_display', msg.get('channel', ''))
+                    )
+                    
+                    if summary_result['success']:
+                        msg['summary'] = summary_result['summary']
+                        msg['summary_quality'] = summary_result.get('quality_score', 8)
                     else:
-                        msg['summary'] = result['summary']  # Fallback summary
+                        msg['summary'] = summary_result['summary']  # Fallback summary
                         msg['summary_quality'] = 3
                 else:
-                    # Fallback: берем первые 150 символов
-                    msg['summary'] = msg['text'][:150] + "..." if len(msg['text']) > 150 else msg['text']
+                    # Fallback без Claude: пропускаем фильтрацию
+                    msg['relevance_score'] = 5
+                    msg['summary'] = msg['text'][:120] + "..." if len(msg['text']) > 120 else msg['text']
                     msg['summary_quality'] = 5
                 
-                summarized_messages.append(msg)
+                processed_messages.append(msg)
                 
             except Exception as e:
-                logger.error(f"❌ Ошибка суммаризации сообщения {msg['id']}: {e}")
-                # Добавляем сообщение без суммаризации
-                msg['summary'] = msg['text'][:150] + "..." if len(msg['text']) > 150 else msg['text']
+                logger.error(f"❌ Ошибка обработки сообщения {msg['id']}: {e}")
+                # При ошибке добавляем с нейтральной оценкой
+                msg['relevance_score'] = 5
+                msg['summary'] = msg['text'][:120] + "..." if len(msg['text']) > 120 else msg['text']
                 msg['summary_quality'] = 3
-                summarized_messages.append(msg)
+                processed_messages.append(msg)
         
-        logger.info(f"✅ Суммаризировано {len(summarized_messages)} сообщений")
-        return summarized_messages
+        logger.info(f"✅ Обработано {len(processed_messages)} релевантных сообщений из {len(messages)}")
+        return processed_messages
+    
+    def _limit_messages_for_telegram(self, messages: List[Dict]) -> List[Dict]:
+        """Ограничиваем количество новостей для соблюдения лимита Telegram"""
+        if not messages:
+            return messages
+            
+        # Рассчитываем примерную длину дайджеста
+        # Заголовок + отбивки + эмодзи ≈ 50 символов
+        base_length = 50
+        
+        # Средняя длина одной новости с форматированием ≈ 250 символов
+        # (140-175 символов саммари + название канала + ссылка + отбивки)
+        avg_news_length = 250
+        
+        # Максимальное количество новостей, которое поместится
+        max_news_count = (4000 - base_length) // avg_news_length
+        
+        if len(messages) > max_news_count:
+            logger.info(f"📏 Ограничиваем количество новостей: {len(messages)} → {max_news_count} для соблюдения лимита Telegram")
+            # Берем новости с наивысшими оценками релевантности
+            sorted_messages = sorted(messages, key=lambda x: x.get('relevance_score', 5), reverse=True)
+            return sorted_messages[:max_news_count]
+        
+        return messages
     
     def format_digest(self, messages: List[Dict]) -> str:
         """Форматирование дайджеста для публикации"""
@@ -326,22 +369,20 @@ class NewsCollector:
                 # Fallback к оригинальному тексту (более развернутый)
                 text = msg['text']
                 
-                # Извлекаем первые два предложения или первые 200 символов
+                # Извлекаем первое предложение или первые 140 символов
                 sentences_end = []
                 for idx, char in enumerate(text):
-                    if char in '.!?' and idx < 300:
+                    if char in '.!?' and idx < 200:
                         sentences_end.append(idx)
-                        if len(sentences_end) >= 2:  # Берем два предложения
+                        if len(sentences_end) >= 1:  # Берем одно предложение
                             break
                 
-                if len(sentences_end) >= 2:
-                    summary = text[:sentences_end[1] + 1].strip()
-                elif len(sentences_end) == 1:
+                if len(sentences_end) >= 1:
                     summary = text[:sentences_end[0] + 1].strip()
                 else:
-                    # Берем первые слова до 150 символов
-                    summary = text[:150].strip()
-                    if len(text) > 150:
+                    # Берем первые слова до 120 символов
+                    summary = text[:120].strip()
+                    if len(text) > 120:
                         summary += '...'
                 
                 # Убираем лишние символы и ссылки
@@ -359,33 +400,67 @@ class NewsCollector:
             clean_username = channel_username.lstrip('@') if channel_username else 'unknown'
             channel_link = f"https://t.me/{clean_username}"
             
-            # Форматируем строку: — Заголовок ([Канал](ссылка))
-            digest_lines.append(f"— {summary} ([{channel_display}]({channel_link}))")
+            # Форматируем строку: — Заголовок / <a href="ссылка">Канал</a>
+            digest_lines.append(f'— {summary} / <a href="{channel_link}">{channel_display}</a>')
             
             # Добавляем отбивку между новостями (кроме последней)
             if i < len(messages) - 1:
                 digest_lines.append("")
         
-        # Добавляем случайный стильный эмодзи в конце
-        import random
-        style_emojis = ['🍿', '🎯', '🚀', '✨', '💡', '🔥', '⚡', '🌟', '💫', '🎪', '🎨', '🎭']
-        random_emoji = random.choice(style_emojis)
+        # Добавляем фиксированный эмодзи в конце
+        fixed_emoji = '⚡'
         
         digest_lines.append("")
-        digest_lines.append(random_emoji)
+        digest_lines.append(fixed_emoji)
         
         digest_text = "\n".join(digest_lines)
         
         # Проверяем длину для Telegram (максимум 4096 символов)
         if len(digest_text) > 4096:
             logger.warning(f"⚠️ Дайджест слишком длинный ({len(digest_text)} символов), обрезаем...")
-            # Обрезаем сообщения, оставляя эмодзи
-            lines_without_emoji = digest_lines[:-2]
-            while len("\n".join(lines_without_emoji + ["", random_emoji])) > 4000:
-                lines_without_emoji.pop()
-            digest_text = "\n".join(lines_without_emoji + ["", random_emoji])
+            
+            # Базовые элементы: заголовок, отбивка после заголовка, финальная отбивка и эмодзи
+            header_lines = digest_lines[:2]  # Заголовок + отбивка
+            footer_lines = ["", fixed_emoji]  # Отбивка + эмодзи
+            base_length = len("\n".join(header_lines + footer_lines))
+            
+            # Доступное место для новостей
+            available_length = 4000 - base_length  # Оставляем запас 96 символов
+            
+            # Добавляем новости пока помещаются
+            news_lines = []
+            current_length = 0
+            
+            # Пропускаем заголовок и отбивку, берем только новости
+            for i in range(2, len(digest_lines) - 2):  # Исключаем заголовок, отбивки и эмодзи
+                line = digest_lines[i]
+                line_length = len(line) + 1  # +1 для символа переноса
+                
+                if current_length + line_length <= available_length:
+                    news_lines.append(line)
+                    current_length += line_length
+                else:
+                    logger.info(f"📏 Остановились на {len(news_lines)} новостях из-за лимита длины")
+                    break
+            
+            # Если удалось добавить хотя бы одну новость
+            if news_lines:
+                digest_lines = header_lines + news_lines + footer_lines
+                digest_text = "\n".join(digest_lines)
+                logger.info(f"✂️ Дайджест обрезан до {len(digest_text)} символов, осталось {len(news_lines)} новостей")
+            else:
+                # Если не помещается ни одна новость - критическая ошибка
+                logger.error("❌ Критическая ошибка: даже одна новость не помещается в лимит Telegram")
+                digest_text = "\n".join([header_lines[0], "", "⚠️ Новости слишком длинные для публикации", "", fixed_emoji])
         
         logger.info(f"✅ Дайджест сформирован: {len(digest_text)} символов")
+        
+        # Финальная проверка лимита
+        if len(digest_text) > 4096:
+            logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА: Дайджест все еще превышает лимит Telegram: {len(digest_text)} символов")
+        else:
+            logger.info(f"✅ Дайджест соответствует лимиту Telegram: {len(digest_text)}/4096 символов")
+        
         return digest_text
     
     async def validate_and_publish(self, digest: str, messages: List[Dict]) -> Dict[str, Any]:
@@ -476,8 +551,11 @@ class NewsCollector:
             # Фильтрация и приоритизация
             filtered_messages = await self.filter_and_prioritize(messages)
             
-            # Суммаризация
-            summarized_messages = await self.summarize_messages(filtered_messages)
+            # Оценка релевантности и суммаризация
+            summarized_messages = await self.evaluate_and_summarize_messages(filtered_messages)
+            
+            # Проверяем и ограничиваем количество новостей для соблюдения лимита Telegram
+            summarized_messages = self._limit_messages_for_telegram(summarized_messages)
             
             # Форматирование
             digest = self.format_digest(summarized_messages)

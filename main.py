@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Основной модуль запуска EdTech News Digest Bot
+ТОЛЬКО SUPABASE - БЕЗ SQLite FALLBACK
 """
 import sys
 import os
@@ -12,7 +13,7 @@ from datetime import datetime
 # Добавляем путь к src модулям
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
-# Настройка детального логирования для main.py
+# Настройка логирования
 os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
@@ -27,18 +28,17 @@ logger = logging.getLogger(__name__)
 
 def log_startup_info():
     """Логируем информацию о запуске системы"""
-    logger.info("🚀 Starting EdTech News Digest Bot v1.0.0")
+    logger.info("🚀 Starting EdTech News Digest Bot v2.0.0 (Supabase Only)")
     logger.info("=" * 60)
     logger.info(f"📅 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"🐍 Python version: {sys.version}")
     logger.info(f"📍 Working directory: {os.getcwd()}")
     logger.info(f"🗂️ Script path: {os.path.abspath(__file__)}")
     logger.info(f"📋 Command line: {' '.join(sys.argv)}")
-    logger.info(f"🌍 Environment variables count: {len(os.environ)}")
     logger.info("=" * 60)
     
     # Логируем ключевые переменные окружения (без значений)
-    key_vars = ['RAILWAY_ENVIRONMENT', 'PORT', 'TELEGRAM_API_ID', 'DATABASE_URL', 'SUPABASE_URL']
+    key_vars = ['RAILWAY_ENVIRONMENT', 'PORT', 'SUPABASE_URL', 'DATABASE_URL', 'TELEGRAM_API_ID']
     logger.info("🔍 Key environment variables status:")
     for var in key_vars:
         status = "✅ Set" if os.getenv(var) else "❌ Missing"
@@ -79,12 +79,12 @@ async def run_collect():
             error_msg = result.get('error', 'Unknown error')
             logger.error(f"❌ News collection failed: {error_msg}")
             
-            if 'telegram' in error_msg.lower():
+            if 'supabase' in error_msg.lower() or 'database' in error_msg.lower():
+                logger.error("💡 Likely cause: Supabase database connection issues")
+                logger.error("🔧 Check SUPABASE_URL, SUPABASE_ANON_KEY, and DATABASE_URL environment variables")
+            elif 'telegram' in error_msg.lower():
                 logger.error("💡 Likely cause: Telegram API credentials missing or invalid")
                 logger.error("🔧 Check TELEGRAM_API_ID and TELEGRAM_API_HASH environment variables")
-            elif 'database' in error_msg.lower():
-                logger.error("💡 Likely cause: Database connection issues")
-                logger.error("🔧 Check DATABASE_URL and Supabase configuration")
                 
             print(f"❌ Ошибка сбора новостей: {error_msg}")
             return 1
@@ -94,6 +94,7 @@ async def run_collect():
         logger.error("🔧 Check that all dependencies are installed and src/ path is correct")
         logger.error(f"📋 Full traceback: {traceback.format_exc()}")
         print(f"❌ Ошибка импорта модулей: {import_error}")
+        print("💡 Установите зависимости: pip install -r requirements.txt")
         return 1
         
     except Exception as e:
@@ -127,7 +128,7 @@ def run_admin():
         logger.error("💡 Run: pip install -r requirements.txt")
         logger.error(f"📋 Full traceback: {traceback.format_exc()}")
         
-        print(f"⚠️  Ошибка импорта админ-панели: {import_error}")
+        print(f"⚠️ Ошибка импорта админ-панели: {import_error}")
         print("🔧 Убедитесь что все зависимости установлены: pip install -r requirements.txt")
         return 1
         
@@ -139,10 +140,33 @@ def run_admin():
         print(f"❌ Ошибка запуска админ-панели: {e}")
         return 1
 
+def run_init():
+    """Инициализация базы данных"""
+    logger.info("🔧 Starting database initialization...")
+    
+    try:
+        from src.database import init_database, test_db
+        
+        print("🚀 Инициализация базы данных Supabase...")
+        init_database()
+        
+        if test_db():
+            print("✅ База данных успешно инициализирована!")
+            return 0
+        else:
+            print("❌ Ошибка тестирования базы данных")
+            return 1
+            
+    except Exception as e:
+        logger.error(f"❌ Database initialization failed: {e}")
+        print(f"❌ Ошибка инициализации базы данных: {e}")
+        print("💡 Проверьте переменные окружения Supabase")
+        return 1
+
 if __name__ == "__main__":
     logger.info("🎯 Main script execution started")
-    print("EdTech News Digest Bot v0.1.0")
-    print("="*40)
+    print("EdTech News Digest Bot v2.0.0 (Supabase Only)")
+    print("="*50)
     
     if len(sys.argv) > 1:
         command = sys.argv[1]
@@ -162,27 +186,30 @@ if __name__ == "__main__":
             logger.info(f"🏁 Admin panel finished with exit code: {exit_code}")
             sys.exit(exit_code)
             
-        elif command == "test":
-            logger.warning("⚠️ Test mode requested - but SIMULATION IS DISABLED in production!")
-            logger.warning("🚫 Test mode redirects to real data collection")
-            print("🧪 Запуск тестового режима (перенаправлено на реальный сбор)...")
-            # В production режиме всегда используем реальные данные
-            exit_code = asyncio.run(run_collect())
-            logger.info(f"🏁 Test mode finished with exit code: {exit_code}")
+        elif command == "init":
+            logger.info("🎯 Executing: database initialization")
+            print("🔧 Инициализация базы данных...")
+            exit_code = run_init()
+            logger.info(f"🏁 Database initialization finished with exit code: {exit_code}")
             sys.exit(exit_code)
             
         else:
             logger.error(f"❌ Unknown command received: {command}")
-            logger.error("💡 Available commands: collect, admin, test")
+            logger.error("💡 Available commands: collect, admin, init")
             print(f"❌ Неизвестная команда: {command}")
-            print("💡 Используйте: collect, admin, test")
+            print("💡 Доступные команды: collect, admin, init")
             sys.exit(1)
     else:
         logger.info("ℹ️ No command specified, showing help")
         print("Доступные команды:")
         print("  python main.py collect  - Сбор и публикация новостей")
         print("  python main.py admin    - Запуск админ-панели")
-        print("  python main.py test     - Тестовый режим (используется реальные данные)")
+        print("  python main.py init     - Инициализация базы данных")
+        print()
+        print("📋 Для начала работы:")
+        print("  1. Настройте переменные окружения в .env файле")
+        print("  2. Инициализируйте базу данных: python main.py init")
+        print("  3. Запустите админ-панель: python main.py admin")
         print()
         logger.info("🏁 Help displayed, exiting")
         sys.exit(0)
