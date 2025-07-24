@@ -3,8 +3,8 @@
 Запуск админ-панели как модуля: python -m src
 """
 
-from .admin_panel import app, FLASK_PORT, create_templates
-from .db_adapter import init_database, test_db, get_database_info
+from .admin_panel import app, FLASK_PORT
+from .database import init_database, test_db, get_database_info
 
 if __name__ == '__main__':
     import logging
@@ -36,7 +36,7 @@ if __name__ == '__main__':
             # Автоматически настраиваем каналы если их нет
             logger.info("📺 Checking EdTech channels...")
             try:
-                from .db_adapter import ChannelsDB
+                from .database import ChannelsDB
                 active_channels = ChannelsDB.get_active_channels()
                 
                 if len(active_channels) == 0:
@@ -88,9 +88,8 @@ if __name__ == '__main__':
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
     
-    # Создаем шаблоны если их нет
-    logger.info("🎨 Creating templates...")
-    create_templates()
+    # Шаблоны должны быть в папке templates
+    logger.info("🎨 Templates should be in templates/ directory")
     
     logger.info("🌐 Starting Flask server...")
     print("🌐 Flask админ-панель запущена!")
