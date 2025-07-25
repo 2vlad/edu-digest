@@ -177,11 +177,38 @@ def get_dashboard_stats():
         cursor.execute('SELECT * FROM run_logs ORDER BY started_at DESC LIMIT 1')
         last_run = cursor.fetchone()
         
+        # Количество успешных запусков за последние 24 часа
+        cursor.execute('''
+            SELECT COUNT(*) FROM run_logs 
+            WHERE status = 'completed' AND started_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
+        ''')
+        result = cursor.fetchone()
+        successful_runs_24h = result['count'] if isinstance(result, dict) else result[0]
+        
+        # Количество опубликованных новостей за последние 24 часа из run_logs
+        cursor.execute('''
+            SELECT COALESCE(SUM(news_published), 0) as total FROM run_logs 
+            WHERE status = 'completed' AND started_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
+        ''')
+        result = cursor.fetchone()
+        news_published_24h = result['total'] if isinstance(result, dict) else result[0]
+        
+        # Количество собранных сообщений за последние 24 часа из run_logs
+        cursor.execute('''
+            SELECT COALESCE(SUM(messages_collected), 0) as total FROM run_logs 
+            WHERE started_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
+        ''')
+        result = cursor.fetchone()
+        messages_collected_24h = result['total'] if isinstance(result, dict) else result[0]
+        
         stats = {
             'active_channels': active_channels,
             'total_channels': total_channels,
             'recent_messages': recent_messages,
             'published_news': published_news,
+            'successful_runs_24h': successful_runs_24h,
+            'news_published_24h': news_published_24h,
+            'messages_collected_24h': messages_collected_24h,
             'last_run': dict(last_run) if last_run else None
         }
         
@@ -260,7 +287,7 @@ def dashboard():
     try:
         logger.info("⚙️ Getting current settings...")
         current_settings = {
-            'max_news_count': SettingsDB.get_setting('max_news_count', '10'),
+            'max_news_count': SettingsDB.get_setting('max_news_count', '7'),
             'target_channel': SettingsDB.get_setting('target_channel', TARGET_CHANNEL),
             'digest_times': SettingsDB.get_setting('digest_times', '12:00,18:00'),
             'hours_lookback': SettingsDB.get_setting('hours_lookback', '12')
@@ -269,11 +296,31 @@ def dashboard():
     except Exception as e:
         logger.error(f"❌ Error getting settings: {e}")
         current_settings = {
-            'max_news_count': '10',
+            'max_news_count': '7',
             'target_channel': TARGET_CHANNEL,
             'digest_times': '12:00,18:00',
             'hours_lookback': '12'
         }
+    
+    # Получаем последние запуски для блока "Последние запуски"
+    recent_logs = []
+    try:
+        logger.info("📜 Getting recent run logs...")
+        conn = get_db()
+        if conn is not None:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM run_logs 
+                ORDER BY started_at DESC 
+                LIMIT 10
+            ''')
+            recent_logs = [dict(row) for row in cursor.fetchall()]
+            logger.info(f"✅ Retrieved {len(recent_logs)} recent logs")
+        else:
+            logger.warning("⚠️ No connection for recent logs")
+    except Exception as e:
+        logger.error(f"❌ Error getting recent logs: {e}")
+        recent_logs = []
     
     logger.info("✅ Dashboard data prepared, rendering template")
     
@@ -281,7 +328,8 @@ def dashboard():
                          stats=stats,
                          channels=channels,
                          settings=current_settings,
-                         db_info=db_info)
+                         db_info=db_info,
+                         recent_logs=recent_logs)
 
 @app.route('/channels')
 def channels():
@@ -341,6 +389,67 @@ def test_route():
     """Тестовый роут для проверки"""
     return "Test route works!"
 
+@app.route('/channels/<int:channel_id>/edit')
+def edit_channel_form(channel_id):
+    """Страница формы редактирования канала"""
+    logger.info(f"✏️ Edit channel form accessed for ID: {channel_id}")
+    
+    try:
+        # Получаем данные канала
+        channels = ChannelsDB.get_active_channels()
+        channel = None
+        for ch in channels:
+            if ch.get('id') == channel_id:
+                channel = ch
+                break
+        
+        if not channel:
+            flash('Канал не найден', 'error')
+            return redirect(url_for('channels'))
+        
+        logger.info(f"✅ Channel {channel_id} found for editing")
+        return render_template('edit_channel.html', channel=channel)
+        
+    except Exception as e:
+        flash(f'Ошибка получения данных канала: {e}', 'error')
+        logger.error(f"❌ Error getting channel {channel_id}: {e}")
+        return redirect(url_for('channels'))
+
+@app.route('/channels/<int:channel_id>/update', methods=['POST'])
+def update_channel(channel_id):
+    """Обновление канала"""
+    logger.info(f"✏️ Update channel request received for ID: {channel_id}")
+    
+    username = request.form.get('username', '').strip()
+    display_name = request.form.get('display_name', '').strip()
+    priority = request.form.get('priority', 0, type=int)
+    is_active = 'is_active' in request.form
+    
+    logger.info(f"📋 Channel update data: {username}, {display_name}, priority={priority}, active={is_active}")
+    
+    if not username:
+        flash('Имя канала обязательно', 'error')
+        return redirect(url_for('edit_channel_form', channel_id=channel_id))
+    
+    # Добавляем @ если отсутствует
+    if not username.startswith('@'):
+        username = '@' + username
+    
+    try:
+        # Обновляем канал
+        result = ChannelsDB.update_channel(channel_id, username, display_name, priority, is_active)
+        if result:
+            flash('Канал успешно обновлен', 'success')
+            logger.info(f"✅ Channel {channel_id} updated successfully")
+        else:
+            flash('Ошибка обновления канала', 'error')
+            logger.error(f"❌ Failed to update channel {channel_id}")
+    except Exception as e:
+        flash(f'Ошибка обновления канала: {e}', 'error')
+        logger.error(f"❌ Channel update error: {e}")
+    
+    return redirect(url_for('channels'))
+
 @app.route('/channels/<int:channel_id>/delete', methods=['POST', 'GET'])
 def delete_channel(channel_id):
     """Удаление канала"""
@@ -388,7 +497,7 @@ def settings():
     
     try:
         current_settings = {
-            'max_news_count': SettingsDB.get_setting('max_news_count', '10'),
+            'max_news_count': SettingsDB.get_setting('max_news_count', '7'),
             'target_channel': SettingsDB.get_setting('target_channel', TARGET_CHANNEL),
             'digest_times': SettingsDB.get_setting('digest_times', '12:00,18:00'),
             'hours_lookback': SettingsDB.get_setting('hours_lookback', '12'),
@@ -409,7 +518,7 @@ def update_settings():
     
     try:
         # Получаем данные из формы
-        max_news_count = request.form.get('max_news_count', '10')
+        max_news_count = request.form.get('max_news_count', '7')
         target_channel = request.form.get('target_channel', TARGET_CHANNEL)
         digest_times = request.form.get('digest_times', '12:00,18:00')
         hours_lookback = request.form.get('hours_lookback', '12')
@@ -467,7 +576,7 @@ def logs():
 def api_stats():
     """API endpoint для получения статистики"""
     try:
-        stats = get_dashboard_statistics()
+        stats = get_dashboard_stats()
         return jsonify({
             'status': 'ok',
             'active_channels': stats.get('active_channels', 0),

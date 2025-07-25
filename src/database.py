@@ -271,7 +271,7 @@ def init_database():
         
         # Вставка настроек по умолчанию
         default_settings = [
-            ('max_news_count', '10', 'Максимальное количество новостей в дайджесте'),
+            ('max_news_count', '7', 'Максимальное количество новостей в дайджесте'),
             ('target_channel', '@vestnik_edtech', 'Целевой канал для публикации'),
             ('digest_times', '12:00,18:00', 'Время публикации дайджестов'),
             ('summary_max_length', '150', 'Максимальная длина суммаризации в символах'),
@@ -513,6 +513,64 @@ class ChannelsDB:
             else:
                 raise
     
+    @staticmethod
+    def update_channel(channel_id: int, username: str, display_name: str = None, priority: int = 0, is_active: bool = True) -> bool:
+        """Обновление канала"""
+        try:
+            # Сначала пытаемся PostgreSQL
+            conn = supabase_db.get_connection()
+            if conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    UPDATE channels 
+                    SET username = %s, display_name = %s, priority = %s, is_active = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                ''', (username, display_name, priority, is_active, channel_id))
+                
+                if cursor.rowcount > 0:
+                    logger.info(f"✅ Канал {channel_id} обновлен через PostgreSQL")
+                    return True
+                else:
+                    logger.warning(f"⚠️ Канал {channel_id} не найден для обновления")
+                    return False
+            else:
+                # Используем REST API
+                logger.info("📡 Используем REST API для обновления канала")
+                data = {
+                    'username': username,
+                    'display_name': display_name,
+                    'priority': priority,
+                    'is_active': is_active,
+                    'updated_at': 'now()'
+                }
+                result = supabase_db.execute_rest_query('channels', 'PATCH', data=data, filters={'id': channel_id})
+                logger.info(f"✅ Канал {channel_id} обновлен через REST API")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка обновления канала {channel_id}: {e}")
+            
+            # Fallback на REST API
+            if 'connection' in str(e).lower() or 'gssapi' in str(e).lower():
+                try:
+                    logger.info("📡 Fallback на REST API для обновления канала")
+                    data = {
+                        'username': username,
+                        'display_name': display_name,
+                        'priority': priority,
+                        'is_active': is_active,
+                        'updated_at': 'now()'
+                    }
+                    result = supabase_db.execute_rest_query('channels', 'PATCH', data=data, filters={'id': channel_id})
+                    logger.info(f"✅ Канал {channel_id} обновлен через REST API fallback")
+                    return True
+                except Exception as api_error:
+                    logger.error(f"❌ REST API fallback тоже не сработал: {api_error}")
+                    raise
+            else:
+                raise
+
     @staticmethod
     def toggle_channel_status(channel_id: int) -> bool:
         """Переключение статуса канала (активен/неактивен)"""

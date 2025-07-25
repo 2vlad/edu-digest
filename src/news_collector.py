@@ -38,7 +38,7 @@ class NewsCollector:
         self.run_id = None
         
         # Настройки из базы данных
-        self.max_news_count = 10
+        self.max_news_count = 7
         self.hours_lookback = 12
         self.target_channel = "@vestnik_edtech"
         
@@ -67,7 +67,7 @@ class NewsCollector:
     
     async def _load_settings(self):
         """Загрузка настроек из базы данных"""
-        self.max_news_count = int(SettingsDB.get_setting('max_news_count', '10'))
+        self.max_news_count = int(SettingsDB.get_setting('max_news_count', '7'))
         self.hours_lookback = int(SettingsDB.get_setting('hours_lookback', '12'))
         self.target_channel = SettingsDB.get_setting('target_channel', '@vestnik_edtech')
         
@@ -242,6 +242,26 @@ class NewsCollector:
         
         logger.info(f"🎯 После фильтрации по релевантности: {len(content_filtered)} сообщений")
         
+        # Фильтрация рекламы и промо-контента
+        ad_keywords = [
+            'скидк', 'промокод', 'купи', 'покуп', 'распродаж', 'акци', 'предложени',
+            'заказать', 'цена', 'стоимост', 'бесплатно', 'дешев', 'выгодн',
+            'продаж', 'магазин', 'товар', 'услуг', 'оплат', 'рекламн'
+        ]
+        
+        ad_filtered = []
+        for msg in content_filtered:
+            text_lower = msg['text'].lower()
+            is_ad = any(keyword in text_lower for keyword in ad_keywords)
+            
+            if is_ad:
+                logger.info(f"🚫 Отклоняем рекламу: {msg['text'][:50]}...")
+                continue
+            
+            ad_filtered.append(msg)
+        
+        logger.info(f"🛡️ После фильтрации рекламы: {len(ad_filtered)} сообщений")
+        
         # Сортировка по комбинированному приоритету
         def priority_score(msg):
             return (
@@ -250,10 +270,10 @@ class NewsCollector:
                 min(msg.get('views', 0) or 0, 1000) / 100  # Популярность (0-10)
             )
         
-        content_filtered.sort(key=priority_score, reverse=True)
+        ad_filtered.sort(key=priority_score, reverse=True)
         
         # Ограничиваем количество
-        final_messages = content_filtered[:self.max_news_count]
+        final_messages = ad_filtered[:self.max_news_count]
         
         logger.info(f"📋 Финальная выборка: {len(final_messages)} сообщений (макс. {self.max_news_count})")
         
@@ -418,8 +438,10 @@ class NewsCollector:
                     if len(text) > 120:
                         summary += '...'
                 
-                # Убираем лишние символы и ссылки
-                summary = summary.replace('**', '').replace('*', '')
+                # Убираем лишние символы и ссылки (улучшенная очистка)
+                summary = summary.replace('**', '').replace('*', '')  # Убираем звездочки
+                summary = summary.replace('__', '').replace('_', '')  # Убираем подчеркивания  
+                summary = summary.replace('~~', '').replace('`', '')  # Убираем другое форматирование
                 summary = summary.split('\n')[0]  # Берем только первую строку
                 summary = summary.split('[')[0]  # Убираем ссылки в квадратных скобках
                 summary = summary.split('(http')[0]  # Убираем URL
