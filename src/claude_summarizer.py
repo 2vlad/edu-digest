@@ -90,7 +90,13 @@ class ClaudeSummarizer:
 ИЗБЕГАЙ:
 - "В связи с", "в рамках", "осуществляется"
 - Сложных конструкций и причастных оборотов
-- Официальной терминологии без нужды"""
+- Официальной терминологии без нужды
+
+КРИТИЧЕСКИ ВАЖНО:
+- Отвечай ТОЛЬКО саммари, никаких объяснений
+- НЕ пиши "Это саммари:", "Короткое и ясное" и подобное
+- НЕ создавай списки критериев или оценок
+- ТОЛЬКО одно предложение с новостью"""
 
         user_prompt = f"""Перескажи эту EdTech новость простыми словами, как будто рассказываешь другу:
 
@@ -98,7 +104,9 @@ class ClaudeSummarizer:
 
 Источник: {channel_name}
 
-Максимум 140 символов, без канцеляризмов, живо и понятно."""
+ВАЖНО: Отвечай ТОЛЬКО одним коротким предложением-саммари, максимум 140 символов. 
+НЕ объясняй почему саммари хорошее, НЕ добавляй комментарии, НЕ перечисляй критерии.
+Просто напиши саммари и всё."""
 
         messages = [{"role": "user", "content": user_prompt}]
         
@@ -234,6 +242,9 @@ class ClaudeSummarizer:
                 elif summary.startswith("'") and summary.endswith("'"):
                     summary = summary[1:-1].strip()
                 
+                # Фильтруем мета-комментарии Claude
+                summary = self._filter_meta_commentary(summary)
+                
                 # Проверяем качество суммаризации
                 quality_check = self._validate_summary_quality(summary, message_text)
                 
@@ -311,6 +322,66 @@ class ClaudeSummarizer:
             "score": max(0, score),
             "issues": issues
         }
+    
+    def _filter_meta_commentary(self, summary: str) -> str:
+        """Фильтрация мета-комментариев Claude о качестве саммари"""
+        # Разбиваем на строки
+        lines = summary.split('\n')
+        
+        # Фильтры для мета-комментариев
+        meta_patterns = [
+            'это саммари',
+            'саммари:',  
+            'короткое и ясное',
+            'содержит ключевую',
+            'передает главную мысль',
+            'написано простым языком',
+            'показывает уникальность',
+            'умещается в лимит',
+            'smart ranking',
+            'критерии:',
+            'оценка:',
+            'качество:',
+            '- ',  # маркированные списки
+            '• ',  # альтернативные маркеры
+            'примеры:',
+            'пояснение:',
+            'комментарий:'
+        ]
+        
+        # Оставляем только строки, которые не содержат мета-комментарии
+        clean_lines = []
+        for line in lines:
+            line_clean = line.strip().lower()
+            
+            # Пропускаем пустые строки
+            if not line_clean:
+                continue
+                
+            # Пропускаем строки с мета-комментариями
+            is_meta = any(pattern in line_clean for pattern in meta_patterns)
+            if is_meta:
+                continue
+                
+            # Пропускаем строки, которые слишком короткие (меньше 20 символов)
+            # если это не единственная строка
+            if len(line.strip()) < 20 and len(lines) > 1:
+                continue
+                
+            clean_lines.append(line.strip())
+        
+        # Если после фильтрации ничего не осталось, берем первую строку
+        if not clean_lines and lines:
+            clean_lines = [lines[0].strip()]
+        
+        # Объединяем оставшиеся строки
+        result = ' '.join(clean_lines)
+        
+        # Дополнительная очистка - удаляем оставшиеся артефакты
+        result = result.replace('—', '-')  # Заменяем длинные тире
+        result = ' '.join(result.split())  # Нормализуем пробелы
+        
+        return result
     
     def _create_fallback_summary(self, message_text: str) -> str:
         """Создание резервного саммари при недоступности Claude"""
