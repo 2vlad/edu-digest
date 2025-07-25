@@ -462,6 +462,27 @@ def logs():
     
     return render_template('logs.html', logs=run_logs)
 
+# API endpoint for stats (for frontend auto-refresh)
+@app.route('/api/stats')
+def api_stats():
+    """API endpoint для получения статистики"""
+    try:
+        stats = get_dashboard_statistics()
+        return jsonify({
+            'status': 'ok',
+            'active_channels': stats.get('active_channels', 0),
+            'total_channels': stats.get('total_channels', 0),
+            'messages_today': stats.get('messages_today', 0),
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"❌ Error in /api/stats: {e}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 # Health check endpoint для Railway
 @app.route('/health')
 def health():

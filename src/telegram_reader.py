@@ -57,12 +57,9 @@ class TelegramChannelReader:
             logger.info("🔗 Creating Telethon client...")
             
             # Используем простое имя сессии
-            # Используем уникальное имя сессии для каждого процесса
-            import time
-            session_name = f'railway_session_{int(time.time())}'
-            
+            # Используем статичное имя сессии, которое есть в файле
             self.client = TelegramClient(
-                session_name, 
+                'railway_session', 
                 int(TELEGRAM_API_ID), 
                 TELEGRAM_API_HASH
             )
@@ -70,18 +67,42 @@ class TelegramChannelReader:
             # Подключаемся
             logger.info("🔗 Starting Telethon client connection...")
             
-            # Пробуем использовать bot token если user session не работает
-            bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-            if bot_token:
-                logger.info("🤖 Trying to start with bot token...")
+            # Проверяем наличие base64 сессии для Railway
+            session_base64 = os.getenv('TELEGRAM_SESSION_BASE64')
+            if session_base64:
+                logger.info("🔐 Found TELEGRAM_SESSION_BASE64 in environment, decoding...")
                 try:
-                    await self.client.start(bot_token=bot_token)
-                    logger.info("✅ Telethon client started with bot token")
+                    import base64
+                    session_data = base64.b64decode(session_base64)
+                    with open('railway_session.session', 'wb') as f:
+                        f.write(session_data)
+                    logger.info("✅ Session file decoded and saved")
                 except Exception as e:
-                    logger.warning(f"⚠️ Bot token failed, trying interactive: {e}")
-                    await self.client.start()
-            else:
+                    logger.error(f"❌ Failed to decode session: {e}")
+            
+            # Проверяем если есть готовая сессия - используем её
+            if os.path.exists('railway_session.session'):
+                logger.info("🔑 Found existing session file, using it for user access")
                 await self.client.start()
+            else:
+                # Fallback на bot token если нет сессии
+                bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+                if bot_token:
+                    logger.info("🤖 No session file, trying bot token...")
+                    logger.warning("⚠️ Note: Bot API has limited access to channels")
+                    logger.warning("⚠️ For full access, use TELEGRAM_SESSION_BASE64 environment variable")
+                    try:
+                        await self.client.start(bot_token=bot_token)
+                        logger.info("✅ Telethon client started with bot token")
+                    except Exception as e:
+                        logger.error(f"❌ Bot token failed: {e}")
+                        if "bot users is restricted" in str(e):
+                            logger.error("💡 Bot users cannot read channels. You need a user session.")
+                            logger.error("💡 Run create_session_for_railway.py locally and add TELEGRAM_SESSION_BASE64 to Railway")
+                        return False
+                else:
+                    logger.error("❌ No session file and no bot token available")
+                    return False
             logger.info("✅ Telethon client connection established")
             
             # Проверяем авторизацию
