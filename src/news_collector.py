@@ -352,12 +352,45 @@ class NewsCollector:
         
         # Определяем время суток для заголовка
         from datetime import timezone
-        current_hour = datetime.now(timezone.utc).hour + 3  # MSK
-        digest_type = "Утренний" if 9 <= current_hour < 15 else "Вечерний"
+        now_msk = datetime.now(timezone.utc).replace(tzinfo=timezone.utc).astimezone(timezone.utc)
+        # Приводим к московскому времени (UTC+3)
+        msk_offset = timedelta(hours=3)
+        now_msk = now_msk + msk_offset
+        
+        current_time = now_msk.time()
+        current_date = now_msk.date()
+        
+        # Определяем тип дайджеста по времени
+        from datetime import time
+        
+        if time(0, 0) <= current_time <= time(12, 29):
+            # С 00:00 до 12:29 - утренний дайджест текущего дня
+            digest_type = "Утренний"
+            digest_date = current_date
+        elif time(12, 30) <= current_time <= time(17, 30):
+            # С 12:30 до 17:30 - дневной дайджест
+            digest_type = "Дневной" 
+            digest_date = current_date
+        else:
+            # С 17:31 до 23:59 - вечерний дайджест
+            digest_type = "Вечерний"
+            digest_date = current_date
+        
+        # Форматируем дату по-русски
+        months_ru = {
+            1: "января", 2: "февраля", 3: "марта", 4: "апреля",
+            5: "мая", 6: "июня", 7: "июля", 8: "августа", 
+            9: "сентября", 10: "октября", 11: "ноября", 12: "декабря"
+        }
+        
+        date_str = f"{digest_date.day} {months_ru[digest_date.month]}"
         
         digest_lines = []
-        # Убираем звездочки у тайтла
-        digest_lines.append(f"{digest_type} дайджест")
+        # Формируем заголовок с датой
+        digest_title = f"{digest_type} дайджест {date_str}"
+        logger.info(f"📰 Заголовок дайджеста: '{digest_title}' (время: {current_time.strftime('%H:%M')} МСК)")
+        
+        digest_lines.append(digest_title)
         digest_lines.append("")  # Отбивка после заголовка
         
         # Форматируем сообщения
