@@ -57,8 +57,12 @@ class TelegramChannelReader:
             logger.info("🔗 Creating Telethon client...")
             
             # Используем простое имя сессии
+            # Используем уникальное имя сессии для каждого процесса
+            import time
+            session_name = f'railway_session_{int(time.time())}'
+            
             self.client = TelegramClient(
-                'railway_session', 
+                session_name, 
                 int(TELEGRAM_API_ID), 
                 TELEGRAM_API_HASH
             )
