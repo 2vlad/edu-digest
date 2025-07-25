@@ -6,7 +6,7 @@
 import asyncio
 import logging
 from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient
 from telethon.tl.types import Message, MessageMediaPhoto, MessageMediaDocument
 
@@ -152,8 +152,7 @@ class TelegramChannelReader:
                 logger.warning(f"⚠️ Не удалось найти канал {channel_username}: {e} - пропускаем")
                 return []
             
-            # Рассчитываем время отсечки с UTC timezone
-            from datetime import timezone
+            # Рассчитываем время отсечки с UTC timezone  
             time_limit = datetime.now(timezone.utc) - timedelta(hours=hours_lookback)
             
             messages = []
@@ -202,6 +201,104 @@ class TelegramChannelReader:
             
         except Exception as e:
             logger.warning(f"⚠️ Ошибка получения сообщений из {channel_username}: {e} - пропускаем канал")
+            return []
+    
+    async def get_channel_messages_by_date_range(self, channel_username: str, 
+                                               start_date: datetime, end_date: datetime, 
+                                               limit: int = 100) -> List[Dict]:
+        """
+        Получение сообщений из канала за определенный период времени
+        
+        Args:
+            channel_username: Имя канала
+            start_date: Начальная дата (включительно)
+            end_date: Конечная дата (исключительно)
+            limit: Максимальное количество сообщений для проверки
+        """
+        try:
+            if not self.initialized:
+                logger.error("❌ Клиент не инициализирован")
+                return []
+            
+            # Очищаем username от символа @ если он есть
+            clean_username = channel_username.lstrip('@')
+            logger.info(f"🔍 Исторический поиск в канале: {channel_username} -> {clean_username}")
+            logger.info(f"📅 Период: {start_date} - {end_date}")
+            
+            # Получаем entity канала
+            try:
+                entity = await self.client.get_entity(clean_username)
+                logger.info(f"✅ Канал найден: {entity.title if hasattr(entity, 'title') else clean_username}")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось найти канал {channel_username}: {e} - пропускаем")
+                return []
+            
+            messages = []
+            checked_count = 0
+            
+            async for message in self.client.iter_messages(entity, limit=limit):
+                checked_count += 1
+                
+                # Убедимся, что дата сообщения имеет timezone
+                msg_date = message.date
+                if msg_date.tzinfo is None:
+                    msg_date = msg_date.replace(tzinfo=timezone.utc)
+                elif msg_date.tzinfo != timezone.utc:
+                    msg_date = msg_date.astimezone(timezone.utc)
+                    
+                # Убедимся, что даты для сравнения тоже имеют timezone
+                if start_date.tzinfo is None:
+                    start_date = start_date.replace(tzinfo=timezone.utc)
+                if end_date.tzinfo is None:
+                    end_date = end_date.replace(tzinfo=timezone.utc)
+                
+                # Если сообщение старше конечной даты, прекращаем поиск
+                if msg_date < start_date:
+                    logger.info(f"📊 Достигли начала периода поиска, проверено {checked_count} сообщений")
+                    break
+                
+                # Если сообщение в нужном диапазоне времени
+                if start_date <= msg_date < end_date:
+                    # Пропускаем пустые сообщения
+                    if not message.text or len(message.text.strip()) < 50:
+                        continue
+                    
+                    # Определяем тип медиа
+                    media_type = None
+                    if hasattr(message, 'media') and message.media:
+                        if isinstance(message.media, MessageMediaPhoto):
+                            media_type = 'photo'
+                        elif isinstance(message.media, MessageMediaDocument):
+                            media_type = 'document'
+                        else:
+                            media_type = 'other'
+                    
+                    # Формируем ссылку на сообщение
+                    link = f"https://t.me/{channel_username.replace('@', '')}/{message.id}"
+                    
+                    # Создаем объект сообщения
+                    msg_data = {
+                        'id': message.id,
+                        'date': msg_date,
+                        'text': message.text,
+                        'channel': channel_username,
+                        'link': link,
+                        'media_type': media_type,
+                        'views': getattr(message, 'views', 0),
+                        'forwards': getattr(message, 'forwards', 0),
+                        'is_reply': message.is_reply,
+                        'sender_id': getattr(message, 'sender_id', None),
+                        'reactions_count': 0,
+                        'external_links': self._extract_links(message.text) if message.text else []
+                    }
+                    
+                    messages.append(msg_data)
+            
+            logger.info(f"📥 Получено {len(messages)} сообщений из {channel_username} за период {start_date.date()} - {end_date.date()}")
+            return messages
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка получения исторических сообщений из {channel_username}: {e}")
             return []
     
     def _extract_links(self, text: str) -> List[str]:
