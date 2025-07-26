@@ -193,18 +193,31 @@ if __name__ == "__main__":
             logger.info(f"🏁 Database initialization finished with exit code: {exit_code}")
             sys.exit(exit_code)
             
+        elif command == "scheduler":
+            logger.info("🎯 Executing: scheduler")
+            print("⏰ Запуск планировщика...")
+            try:
+                import subprocess
+                # Запускаем scheduler.py как отдельный процесс
+                subprocess.run([sys.executable, "scheduler.py"], check=True)
+            except Exception as e:
+                logger.error(f"❌ Scheduler error: {e}")
+                print(f"❌ Ошибка планировщика: {e}")
+                sys.exit(1)
+            
         else:
             logger.error(f"❌ Unknown command received: {command}")
             logger.error("💡 Available commands: collect, admin, init")
             print(f"❌ Неизвестная команда: {command}")
-            print("💡 Доступные команды: collect, admin, init")
+            print("💡 Доступные команды: collect, admin, init, scheduler")
             sys.exit(1)
     else:
         logger.info("ℹ️ No command specified, showing help")
         print("Доступные команды:")
-        print("  python main.py collect  - Сбор и публикация новостей")
-        print("  python main.py admin    - Запуск админ-панели")
-        print("  python main.py init     - Инициализация базы данных")
+        print("  python main.py collect    - Сбор и публикация новостей")
+        print("  python main.py admin      - Запуск админ-панели")
+        print("  python main.py init       - Инициализация базы данных")
+        print("  python main.py scheduler  - Запуск планировщика")
         print()
         print("📋 Для начала работы:")
         print("  1. Настройте переменные окружения в .env файле")

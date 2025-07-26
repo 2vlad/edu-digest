@@ -21,6 +21,17 @@
 <div class="alert alert-info">
     <i class="fas fa-info-circle"></i> Нет накопленных новостей. Запустите сбор новостей для накопления.
 </div>
+
+<!-- Кнопка создания таблицы если она отсутствует -->
+<div class="alert alert-warning">
+    <h6><i class="fas fa-exclamation-triangle"></i> Таблица pending_news отсутствует</h6>
+    <p>Если вы видите ошибки "relation does not exist", нужно создать таблицу:</p>
+    <form method="POST" action="{{ url_for('create_pending_table') }}" class="d-inline">
+        <button type="submit" class="btn btn-warning" onclick="return confirm('Создать таблицу pending_news?')">
+            <i class="fas fa-plus"></i> Создать таблицу pending_news
+        </button>
+    </form>
+</div>
 {% else %}
     {% for group_key, news_list in grouped_news.items() %}
     <div class="card mb-4">

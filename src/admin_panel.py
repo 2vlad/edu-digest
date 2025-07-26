@@ -597,6 +597,53 @@ def delete_pending_news(news_id):
     
     return redirect(url_for('pending_news'))
 
+@app.route('/create-pending-table', methods=['POST'])
+def create_pending_table():
+    """Создание таблицы pending_news если её нет"""
+    logger.info("🔧 Creating pending_news table requested")
+    
+    try:
+        conn = get_db()
+        if conn is None:
+            flash("❌ PostgreSQL недоступен, создайте таблицу через Supabase SQL Editor", 'error')
+            return redirect(url_for('pending_news'))
+            
+        cursor = conn.cursor()
+        
+        # SQL для создания таблицы pending_news
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pending_news (
+                id SERIAL PRIMARY KEY,
+                channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+                message_id BIGINT NOT NULL,
+                channel_name TEXT NOT NULL,
+                message_text TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                relevance_score INTEGER DEFAULT 5,
+                collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                scheduled_for DATE,
+                digest_type VARCHAR(20),
+                is_approved BOOLEAN DEFAULT true,
+                is_deleted BOOLEAN DEFAULT false,
+                UNIQUE(channel_id, message_id)
+            )
+        ''')
+        
+        # Создаем индексы
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pending_news_scheduled_for ON pending_news(scheduled_for)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pending_news_digest_type ON pending_news(digest_type)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pending_news_is_deleted ON pending_news(is_deleted)')
+        
+        conn.commit()
+        flash("✅ Таблица pending_news создана успешно!", 'success')
+        logger.info("✅ pending_news table created successfully")
+        
+    except Exception as e:
+        flash(f"❌ Ошибка создания таблицы: {str(e)}", 'error')
+        logger.error(f"❌ Error creating pending_news table: {e}")
+    
+    return redirect(url_for('pending_news'))
+
 @app.route('/publish-digest', methods=['POST'])
 def publish_digest():
     """Публикация накопленного дайджеста"""
