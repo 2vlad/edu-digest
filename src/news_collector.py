@@ -39,7 +39,7 @@ class NewsCollector:
         
         # Настройки из базы данных
         self.max_news_count = 7
-        self.hours_lookback = 12
+        self.hours_lookback = 24
         self.target_channel = "@vestnik_edtech"
         
     async def initialize(self):
@@ -68,7 +68,7 @@ class NewsCollector:
     async def _load_settings(self):
         """Загрузка настроек из базы данных"""
         self.max_news_count = int(SettingsDB.get_setting('max_news_count', '7'))
-        self.hours_lookback = int(SettingsDB.get_setting('hours_lookback', '12'))
+        self.hours_lookback = int(SettingsDB.get_setting('hours_lookback', '24'))
         self.target_channel = SettingsDB.get_setting('target_channel', '@vestnik_edtech')
         
         logger.info(f"📊 Настройки: max_news={self.max_news_count}, lookback={self.hours_lookback}h, target={self.target_channel}")
@@ -243,16 +243,33 @@ class NewsCollector:
         logger.info(f"🎯 После фильтрации по релевантности: {len(content_filtered)} сообщений")
         
         # Фильтрация рекламы и промо-контента
-        ad_keywords = [
-            'скидк', 'промокод', 'купи', 'покуп', 'распродаж', 'акци', 'предложени',
-            'заказать', 'цена', 'стоимост', 'бесплатно', 'дешев', 'выгодн',
-            'продаж', 'магазин', 'товар', 'услуг', 'оплат', 'рекламн'
+        # Используем более точные фразы вместо отдельных слов
+        ad_phrases = [
+            'скидк', 'промокод', 'купить сейчас', 'купите', 'распродаж', 
+            'специальное предложение', 'спецпредложение', 'успей купить',
+            'заказать со скидкой', 'цена снижена', 'только сегодня', 
+            'ограниченное предложение', 'выгодная цена', 'супер цена',
+            'продажа курсов', 'рекламный пост', 'реклама:', '#реклама'
         ]
+        
+        # Проверяем также комбинации слов
+        sell_words = ['купи', 'закаж', 'приобрет', 'оформ', 'оплат']
+        price_words = ['цен', 'стоимост', 'рубл', '₽', '$', 'тариф']
         
         ad_filtered = []
         for msg in content_filtered:
             text_lower = msg['text'].lower()
-            is_ad = any(keyword in text_lower for keyword in ad_keywords)
+            
+            # Проверяем наличие явных рекламных фраз
+            has_ad_phrase = any(phrase in text_lower for phrase in ad_phrases)
+            
+            # Проверяем комбинацию "продажа + цена"
+            has_sell_word = any(word in text_lower for word in sell_words)
+            has_price_word = any(word in text_lower for word in price_words)
+            is_likely_ad = has_sell_word and has_price_word
+            
+            # Это реклама если есть явная фраза ИЛИ комбинация продажа+цена
+            is_ad = has_ad_phrase or is_likely_ad
             
             if is_ad:
                 logger.info(f"🚫 Отклоняем рекламу: {msg['text'][:50]}...")
@@ -301,8 +318,8 @@ class NewsCollector:
                     relevance_score = relevance_result.get('relevance_score', 5)
                     msg['relevance_score'] = relevance_score
                     
-                    # Фильтруем новости с оценкой меньше 5
-                    if relevance_score < 5:
+                    # Фильтруем новости с оценкой меньше 3 (было 5)
+                    if relevance_score < 3:
                         logger.info(f"🚫 Пропускаем новость (релевантность: {relevance_score}/10): {msg['text'][:50]}...")
                         continue
                     
