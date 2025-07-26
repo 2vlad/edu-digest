@@ -243,6 +243,25 @@ def init_database():
             )
         ''')
         
+        # Таблица накопленных новостей (ожидающих публикации)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pending_news (
+                id SERIAL PRIMARY KEY,
+                channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+                message_id BIGINT NOT NULL,
+                channel_name TEXT NOT NULL,
+                message_text TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                relevance_score INTEGER DEFAULT 5,
+                collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                scheduled_for DATE,
+                digest_type VARCHAR(20),
+                is_approved BOOLEAN DEFAULT true,
+                is_deleted BOOLEAN DEFAULT false,
+                UNIQUE(channel_id, message_id)
+            )
+        ''')
+        
         # Настройки системы
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS settings (
@@ -921,6 +940,145 @@ class ProcessedMessagesDB:
         except Exception as e:
             logger.error(f"❌ Ошибка отметки сообщения: {e}")
             raise
+
+# Функции для работы с накопленными новостями
+class PendingNewsDB:
+    @staticmethod
+    def add_pending_news(channel_id: int, message_id: int, channel_name: str, 
+                        message_text: str, summary: str, relevance_score: int = 5,
+                        scheduled_for: datetime = None, digest_type: str = None) -> int:
+        """Добавление новости в очередь на публикацию"""
+        try:
+            conn = supabase_db.get_connection()
+            if conn is None:
+                # REST API fallback
+                data = {
+                    'channel_id': channel_id,
+                    'message_id': message_id,
+                    'channel_name': channel_name,
+                    'message_text': message_text,
+                    'summary': summary,
+                    'relevance_score': relevance_score,
+                    'collected_at': datetime.now().isoformat(),
+                    'scheduled_for': scheduled_for.date().isoformat() if scheduled_for else datetime.now().date().isoformat(),
+                    'digest_type': digest_type,
+                    'is_approved': True,
+                    'is_deleted': False
+                }
+                result = supabase_db.execute_rest_query('pending_news', 'POST', data=data)
+                return result[0].get('id', 0) if result else 0
+                
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO pending_news 
+                (channel_id, message_id, channel_name, message_text, summary, 
+                 relevance_score, scheduled_for, digest_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (channel_id, message_id) DO NOTHING
+                RETURNING id
+            ''', (channel_id, message_id, channel_name, message_text, summary,
+                  relevance_score, scheduled_for or datetime.now().date(), digest_type))
+            
+            result = cursor.fetchone()
+            return result['id'] if result else 0
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка добавления pending news: {e}")
+            return 0
+    
+    @staticmethod
+    def get_pending_news(scheduled_for: datetime = None, digest_type: str = None, 
+                        include_deleted: bool = False) -> List[Dict]:
+        """Получение накопленных новостей для дайджеста"""
+        try:
+            filters = {}
+            if scheduled_for:
+                filters['scheduled_for'] = scheduled_for.date().isoformat()
+            if digest_type:
+                filters['digest_type'] = digest_type
+            if not include_deleted:
+                filters['is_deleted'] = False
+                
+            conn = supabase_db.get_connection()
+            if conn is None:
+                # REST API fallback
+                result = supabase_db.execute_rest_query('pending_news', 'GET', filters=filters)
+                return sorted(result, key=lambda x: x.get('relevance_score', 0), reverse=True) if result else []
+                
+            cursor = conn.cursor()
+            query = '''
+                SELECT * FROM pending_news 
+                WHERE is_deleted = false
+            '''
+            params = []
+            
+            if scheduled_for:
+                query += ' AND scheduled_for = %s'
+                params.append(scheduled_for.date())
+            if digest_type:
+                query += ' AND digest_type = %s'
+                params.append(digest_type)
+                
+            query += ' ORDER BY relevance_score DESC, collected_at DESC'
+            
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения pending news: {e}")
+            return []
+    
+    @staticmethod
+    def delete_pending_news(news_id: int) -> bool:
+        """Мягкое удаление новости из очереди"""
+        try:
+            conn = supabase_db.get_connection()
+            if conn is None:
+                # REST API fallback
+                data = {'is_deleted': True}
+                result = supabase_db.execute_rest_query(f'pending_news', 'PATCH', data=data, 
+                                                       filters={'id': news_id})
+                return bool(result)
+                
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE pending_news 
+                SET is_deleted = true 
+                WHERE id = %s
+                RETURNING id
+            ''', (news_id,))
+            
+            result = cursor.fetchone()
+            return result is not None
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка удаления pending news: {e}")
+            return False
+    
+    @staticmethod 
+    def clear_old_pending_news(days_old: int = 7) -> int:
+        """Очистка старых накопленных новостей"""
+        try:
+            conn = supabase_db.get_connection()
+            cutoff_date = (datetime.now() - timedelta(days=days_old)).date()
+            
+            if conn is None:
+                # REST API не поддерживает bulk delete, пропускаем
+                return 0
+                
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM pending_news 
+                WHERE scheduled_for < %s OR collected_at < %s
+                RETURNING id
+            ''', (cutoff_date, cutoff_date))
+            
+            deleted = cursor.fetchall()
+            return len(deleted)
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка очистки старых pending news: {e}")
+            return 0
 
 def get_database_info() -> Dict[str, Any]:
     """Возвращает информацию о базе данных"""

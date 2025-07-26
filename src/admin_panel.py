@@ -30,7 +30,7 @@ logger.info("🚀 Starting Admin Panel - SUPABASE ONLY MODE")
 try:
     logger.info("📦 Attempting relative import...")
     from .database import (
-        ChannelsDB, SettingsDB, ProcessedMessagesDB,
+        ChannelsDB, SettingsDB, ProcessedMessagesDB, PendingNewsDB,
         create_connection, test_db, init_database, get_database_info
     )
     from .config import FLASK_SECRET_KEY, FLASK_PORT, TARGET_CHANNEL
@@ -38,7 +38,7 @@ try:
 except ImportError:
     logger.info("📦 Falling back to absolute import...")
     from database import (
-        ChannelsDB, SettingsDB, ProcessedMessagesDB,
+        ChannelsDB, SettingsDB, ProcessedMessagesDB, PendingNewsDB,
         create_connection, test_db, init_database, get_database_info
     )
     from config import FLASK_SECRET_KEY, FLASK_PORT, TARGET_CHANNEL
@@ -551,6 +551,87 @@ def update_settings():
         logger.error(f"❌ Settings update error: {e}")
     
     return redirect(url_for('settings'))
+
+@app.route('/pending-news')
+def pending_news():
+    """Страница накопленных новостей"""
+    logger.info("📰 Pending news page accessed")
+    
+    try:
+        # Получаем накопленные новости
+        pending = PendingNewsDB.get_pending_news()
+        
+        # Группируем по дате и типу дайджеста
+        grouped_news = {}
+        for news in pending:
+            key = f"{news.get('scheduled_for', 'Unknown')} - {news.get('digest_type', 'Unknown')}"
+            if key not in grouped_news:
+                grouped_news[key] = []
+            grouped_news[key].append(news)
+        
+        logger.info(f"✅ Retrieved {len(pending)} pending news items")
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting pending news: {e}")
+        grouped_news = {}
+        flash(f'Ошибка получения накопленных новостей: {e}', 'error')
+    
+    return render_template('pending_news.html', grouped_news=grouped_news)
+
+@app.route('/pending-news/<int:news_id>/delete', methods=['POST'])
+def delete_pending_news(news_id):
+    """Удаление накопленной новости"""
+    logger.info(f"🗑️ Delete pending news request for ID: {news_id}")
+    
+    try:
+        result = PendingNewsDB.delete_pending_news(news_id)
+        if result:
+            flash('Новость удалена из очереди', 'success')
+            logger.info(f"✅ Pending news {news_id} deleted successfully")
+        else:
+            flash('Ошибка удаления новости', 'error')
+            logger.error(f"❌ Failed to delete pending news {news_id}")
+    except Exception as e:
+        flash(f'Ошибка удаления: {e}', 'error')
+        logger.error(f"❌ Error deleting pending news: {e}")
+    
+    return redirect(url_for('pending_news'))
+
+@app.route('/publish-digest', methods=['POST'])
+def publish_digest():
+    """Публикация накопленного дайджеста"""
+    logger.info("📤 Manual digest publication requested")
+    
+    try:
+        import asyncio
+        from src.news_collector import NewsCollector
+        
+        # Создаем новый event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            collector = NewsCollector()
+            # Инициализация
+            loop.run_until_complete(collector.initialize())
+            # Публикация
+            result = loop.run_until_complete(collector.publish_accumulated_digest())
+            
+            if result['success']:
+                flash(f"✅ Дайджест опубликован! Новостей: {result.get('news_count', 0)}", 'success')
+                logger.info(f"✅ Manual digest published: {result.get('news_count', 0)} news")
+            else:
+                flash(f"❌ Ошибка публикации: {result.get('error', 'Unknown')}", 'error')
+                logger.error(f"❌ Manual digest publication failed: {result.get('error', 'Unknown')}")
+                
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        flash(f"❌ Критическая ошибка: {str(e)}", 'error')
+        logger.error(f"❌ Critical error in manual digest publication: {e}")
+    
+    return redirect(url_for('pending_news'))
 
 @app.route('/logs')
 def logs():

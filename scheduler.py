@@ -41,8 +41,8 @@ def get_schedule_times():
         return ['12:00', '18:00']
 
 def run_news_collection():
-    """Запуск сбора новостей"""
-    logger.info("🚀 Запуск автоматического сбора новостей...")
+    """Запуск сбора новостей (накопление)"""
+    logger.info("🚀 Запуск автоматического сбора новостей (накопление)...")
     
     try:
         # Импортируем функцию сбора
@@ -71,6 +71,44 @@ def run_news_collection():
         import traceback
         logger.error(f"📋 Traceback: {traceback.format_exc()}")
 
+def publish_accumulated_news():
+    """Публикация накопленного дайджеста"""
+    logger.info("📤 Запуск публикации накопленного дайджеста...")
+    
+    try:
+        from src.news_collector import NewsCollector
+        
+        # Создаем новый event loop для асинхронного выполнения
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            start_time = datetime.now()
+            collector = NewsCollector()
+            
+            # Инициализация
+            loop.run_until_complete(collector.initialize())
+            
+            # Публикация накопленного
+            result = loop.run_until_complete(collector.publish_accumulated_digest())
+            
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            
+            if result['success']:
+                logger.info(f"✅ Публикация завершена успешно за {duration:.2f}с")
+                logger.info(f"📰 Опубликовано новостей: {result.get('news_count', 0)}")
+            else:
+                logger.error(f"❌ Публикация завершилась с ошибкой: {result.get('error', 'Unknown')}")
+                
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка публикации: {e}")
+        import traceback
+        logger.error(f"📋 Traceback: {traceback.format_exc()}")
+
 def setup_schedule():
     """Настройка расписания"""
     logger.info("⏰ Настройка расписания автоматических запусков...")
@@ -78,29 +116,37 @@ def setup_schedule():
     # Очищаем предыдущие задания
     schedule.clear()
     
-    # Получаем время из настроек
+    # Настраиваем почасовой сбор новостей (накопление)
+    schedule.every().hour.do(run_news_collection)
+    logger.info("📅 Настроен почасовой сбор новостей")
+    
+    # Получаем время публикации из настроек
     times = get_schedule_times()
     
-    # Настраиваем задания для каждого времени
+    # Настраиваем публикацию для каждого времени
     for time_str in times:
         try:
             # Проверяем формат времени
             datetime.strptime(time_str, '%H:%M')
             
-            # Добавляем задание
-            schedule.every().day.at(time_str).do(run_news_collection)
-            logger.info(f"📅 Настроен запуск в {time_str} каждый день")
+            # Добавляем задание публикации
+            schedule.every().day.at(time_str).do(publish_accumulated_news)
+            logger.info(f"📅 Настроена публикация дайджеста в {time_str} каждый день")
             
         except ValueError:
             logger.error(f"❌ Неверный формат времени: {time_str}. Ожидается HH:MM")
     
-    if not schedule.jobs:
-        logger.warning("⚠️ Не удалось настроить ни одного задания! Используем значения по умолчанию")
-        schedule.every().day.at("12:00").do(run_news_collection)
-        schedule.every().day.at("18:00").do(run_news_collection)
-        logger.info("📅 Настроены запуски по умолчанию: 12:00 и 18:00")
+    # Если не удалось настроить публикацию, используем значения по умолчанию
+    publication_jobs = [job for job in schedule.jobs if job.job_func == publish_accumulated_news]
+    if not publication_jobs:
+        logger.warning("⚠️ Не удалось настроить публикацию! Используем значения по умолчанию")
+        schedule.every().day.at("12:00").do(publish_accumulated_news)
+        schedule.every().day.at("18:00").do(publish_accumulated_news)
+        logger.info("📅 Настроена публикация по умолчанию: 12:00 и 18:00")
     
-    logger.info(f"✅ Настроено {len(schedule.jobs)} автоматических заданий")
+    logger.info(f"✅ Настроено {len(schedule.jobs)} автоматических заданий:"
+                f" {len([j for j in schedule.jobs if j.job_func == run_news_collection])} сбор,"
+                f" {len([j for j in schedule.jobs if j.job_func == publish_accumulated_news])} публикация")
 
 def log_next_runs():
     """Логируем информацию о следующих запусках"""

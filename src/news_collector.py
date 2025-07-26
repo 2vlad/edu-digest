@@ -535,71 +535,76 @@ class NewsCollector:
         
         return digest_text
     
-    async def validate_and_publish(self, digest: str, messages: List[Dict]) -> Dict[str, Any]:
-        """Валидация и публикация дайджеста"""
+    async def save_to_pending(self, messages: List[Dict]) -> Dict[str, Any]:
+        """Сохранение новостей в очередь вместо публикации"""
         try:
-            logger.info("🔍 Валидация дайджеста перед публикацией...")
+            logger.info("💾 Сохраняем новости в очередь...")
             
-            # Валидация содержания
-            validation_errors = []
+            # Определяем время и тип дайджеста
+            from datetime import timezone
+            now_msk = datetime.now(timezone.utc).replace(tzinfo=timezone.utc).astimezone(timezone.utc)
+            msk_offset = timedelta(hours=3)
+            now_msk = now_msk + msk_offset
             
-            if len(digest.strip()) < 50:
-                validation_errors.append("Дайджест слишком короткий")
+            current_time = now_msk.time()
+            from datetime import time
             
-            if len(digest) > 4096:
-                validation_errors.append("Дайджест превышает лимит Telegram (4096 символов)")
-            
-            if not messages:
-                validation_errors.append("Нет новостей для публикации")
-            
-            # Проверяем качество суммаризации
-            if messages:
-                avg_quality = sum(msg.get('summary_quality', 0) for msg in messages) / len(messages)
-                if avg_quality < 5:
-                    validation_errors.append(f"Низкое качество суммаризации ({avg_quality:.1f}/10)")
-            
-            if validation_errors:
-                logger.warning(f"⚠️ Найдены проблемы валидации: {'; '.join(validation_errors)}")
-            
-            # Публикация в Telegram
-            logger.info(f"📡 Публикуем дайджест в {self.target_channel}...")
-            
-            publication_success = await self.telegram_bot.send_digest(digest)
-            
-            if publication_success:
-                logger.info("✅ Дайджест успешно опубликован!")
-                
-                # Отмечаем сообщения как обработанные
-                for msg in messages:
-                    ProcessedMessagesDB.mark_message_processed(
-                        msg['channel_id'], 
-                        msg['id'],
-                        msg['text'],
-                        msg.get('summary', '')
-                    )
-                
-                return {
-                    "success": True,
-                    "published": True,
-                    "validation_errors": validation_errors,
-                    "news_count": len(messages),
-                    "digest_length": len(digest)
-                }
+            if time(0, 0) <= current_time <= time(12, 29):
+                digest_type = "Утренний"
+            elif time(12, 30) <= current_time <= time(17, 30):
+                digest_type = "Дневной" 
             else:
-                logger.error("❌ Ошибка публикации в Telegram")
-                return {
-                    "success": False,
-                    "published": False,
-                    "error": "Ошибка публикации в Telegram",
-                    "validation_errors": validation_errors
-                }
-        
+                digest_type = "Вечерний"
+            
+            scheduled_for = now_msk.date()
+            
+            # Сохраняем каждую новость
+            saved_count = 0
+            for msg in messages:
+                try:
+                    # Импортируем здесь чтобы избежать циклических импортов
+                    from .database import PendingNewsDB
+                    
+                    news_id = PendingNewsDB.add_pending_news(
+                        channel_id=msg['channel_id'],
+                        message_id=msg['id'],
+                        channel_name=msg.get('channel_display', msg.get('channel', 'Unknown')),
+                        message_text=msg.get('text', ''),
+                        summary=msg.get('summary', ''),
+                        relevance_score=msg.get('relevance_score', 5),
+                        scheduled_for=now_msk,
+                        digest_type=digest_type
+                    )
+                    
+                    if news_id:
+                        saved_count += 1
+                        logger.info(f"✅ Новость сохранена: {msg.get('summary', '')[:50]}...")
+                        
+                        # Отмечаем как обработанное
+                        ProcessedMessagesDB.mark_message_processed(
+                            msg['channel_id'], 
+                            msg['id'],
+                            msg.get('text', ''),
+                            msg.get('summary', '')
+                        )
+                except Exception as e:
+                    logger.error(f"❌ Ошибка сохранения новости: {e}")
+            
+            logger.info(f"💾 Сохранено {saved_count} из {len(messages)} новостей")
+            
+            return {
+                "success": True,
+                "saved_count": saved_count,
+                "digest_type": digest_type,
+                "scheduled_for": scheduled_for.isoformat()
+            }
+            
         except Exception as e:
-            logger.error(f"❌ Ошибка валидации и публикации: {e}")
+            logger.error(f"❌ Критическая ошибка при сохранении: {e}")
             return {
                 "success": False,
-                "published": False,
-                "error": str(e)
+                "error": str(e),
+                "saved_count": 0
             }
     
     async def run_full_cycle(self) -> Dict[str, Any]:
@@ -629,27 +634,24 @@ class NewsCollector:
             # Проверяем и ограничиваем количество новостей для соблюдения лимита Telegram
             summarized_messages = self._limit_messages_for_telegram(summarized_messages)
             
-            # Форматирование
-            digest = self.format_digest(summarized_messages)
-            
-            # Валидация и публикация
-            publish_result = await self.validate_and_publish(digest, summarized_messages)
+            # Сохраняем в очередь вместо публикации
+            save_result = await self.save_to_pending(summarized_messages)
             
             # Финальный результат
             end_time = datetime.now()
             execution_time = (end_time - start_time).total_seconds()
             
             result = {
-                "success": publish_result["success"],
+                "success": save_result["success"],
                 "execution_time": execution_time,
                 "channels_processed": channels_processed,
                 "messages_collected": len(messages),
                 "messages_filtered": len(filtered_messages),
                 "messages_summarized": len(summarized_messages),
-                "news_published": len(summarized_messages) if publish_result["published"] else 0,
-                "digest_length": len(digest),
-                "validation_errors": publish_result.get("validation_errors", []),
-                "published": publish_result["published"]
+                "news_published": 0,  # Не публикуем сразу
+                "news_saved": save_result.get("saved_count", 0),
+                "digest_type": save_result.get("digest_type", "Unknown"),
+                "scheduled_for": save_result.get("scheduled_for", "")
             }
             
             # Обновляем лог запуска
@@ -659,7 +661,7 @@ class NewsCollector:
                 channels_processed=result["channels_processed"],
                 messages_collected=result["messages_collected"],
                 news_published=result["news_published"],
-                error_message=publish_result.get("error") if not result["success"] else None
+                error_message=save_result.get("error") if not result["success"] else None
             )
             
             logger.info(f"🎉 Полный цикл завершен за {execution_time:.1f}с:")
@@ -693,6 +695,77 @@ class NewsCollector:
                 "messages_filtered": 0,
                 "messages_summarized": 0,
                 "news_published": 0
+            }
+    
+    async def publish_accumulated_digest(self) -> Dict[str, Any]:
+        """Публикация накопленного дайджеста"""
+        try:
+            logger.info("📤 Публикация накопленного дайджеста...")
+            
+            # Импортируем здесь чтобы избежать циклических импортов
+            from .database import PendingNewsDB
+            
+            # Получаем накопленные новости
+            pending_news = PendingNewsDB.get_pending_news()
+            
+            if not pending_news:
+                logger.info("📭 Нет накопленных новостей для публикации")
+                return {
+                    "success": True,
+                    "message": "Нет новостей для публикации",
+                    "news_count": 0
+                }
+            
+            # Преобразуем в формат для публикации
+            messages = []
+            for news in pending_news[:self.max_news_count]:  # Ограничиваем количество
+                messages.append({
+                    'text': news['message_text'],
+                    'summary': news['summary'],
+                    'channel': news['channel_name'],
+                    'channel_display': news['channel_name'],
+                    'relevance_score': news['relevance_score']
+                })
+            
+            # Форматируем дайджест
+            digest = self.format_digest(messages)
+            
+            # Публикуем
+            logger.info(f"📡 Публикуем дайджест из {len(messages)} новостей в {self.target_channel}...")
+            publication_success = await self.telegram_bot.send_digest(digest)
+            
+            if publication_success:
+                logger.info("✅ Дайджест успешно опубликован!")
+                
+                # Помечаем новости как удаленные (мягкое удаление)
+                for news in pending_news[:self.max_news_count]:
+                    PendingNewsDB.delete_pending_news(news['id'])
+                
+                # Добавляем лог запуска
+                self._add_run_log(
+                    status='completed',
+                    messages_collected=0,
+                    news_published=len(messages),
+                    digest_text=digest[:500] + ('...' if len(digest) > 500 else '')
+                )
+                
+                return {
+                    "success": True,
+                    "digest": digest,
+                    "news_count": len(messages)
+                }
+            else:
+                logger.error("❌ Ошибка публикации дайджеста")
+                return {
+                    "success": False,
+                    "error": "Ошибка публикации в Telegram"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Критическая ошибка при публикации накопленного: {e}")
+            return {
+                "success": False,
+                "error": str(e)
             }
 
 # Основная функция для запуска из командной строки
