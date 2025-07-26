@@ -57,7 +57,18 @@
                                 </details>
                             </td>
                             <td>
-                                <span class="badge bg-secondary">{{ news.channel_name }}</span>
+                                {% set clean_channel = news.channel_name.lstrip('@') %}
+                                {% if news.message_id %}
+                                    <a href="https://t.me/{{ clean_channel }}/{{ news.message_id }}" 
+                                       target="_blank" class="badge bg-secondary text-decoration-none">
+                                        📎 {{ news.channel_name }}
+                                    </a>
+                                {% else %}
+                                    <a href="https://t.me/{{ clean_channel }}" 
+                                       target="_blank" class="badge bg-secondary text-decoration-none">
+                                        📢 {{ news.channel_name }}
+                                    </a>
+                                {% endif %}
                             </td>
                             <td>
                                 <div class="progress" style="height: 20px;">

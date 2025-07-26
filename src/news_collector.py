@@ -464,16 +464,25 @@ class NewsCollector:
                 summary = summary.split('(http')[0]  # Убираем URL
                 summary = summary.strip()
             
-            # Получаем название канала и создаем ссылку
+            # Получаем название канала и создаем ссылку на конкретный пост
             channel_display = msg.get('channel_display', msg.get('channel', 'Unknown'))
             channel_username = msg.get('channel', '')
+            message_id = msg.get('id', '')
             
-            # Создаем ссылку на канал (убираем @ для правильной ссылки)
+            # Создаем ссылку на конкретный пост (убираем @ для правильной ссылки)
             clean_username = channel_username.lstrip('@') if channel_username else 'unknown'
-            channel_link = f"https://t.me/{clean_username}"
             
-            # Форматируем строку: — Заголовок / <a href="ссылка">Канал</a>
-            digest_lines.append(f'— {summary} / <a href="{channel_link}">{channel_display}</a>')
+            # Ссылка на конкретный пост: https://t.me/channel_name/message_id
+            if message_id:
+                post_link = f"https://t.me/{clean_username}/{message_id}"
+                link_text = f"📎 {channel_display}"  # Добавляем иконку ссылки
+            else:
+                # Fallback на канал если нет ID сообщения
+                post_link = f"https://t.me/{clean_username}"
+                link_text = f"📢 {channel_display}"
+            
+            # Форматируем строку: — Заголовок / <a href="ссылка_на_пост">📎 Канал</a>
+            digest_lines.append(f'— {summary} / <a href="{post_link}">{link_text}</a>')
             
             # Добавляем отбивку между новостями (кроме последней)
             if i < len(messages) - 1:
@@ -565,10 +574,15 @@ class NewsCollector:
                     # Импортируем здесь чтобы избежать циклических импортов
                     from .database import PendingNewsDB
                     
+                    # Используем username канала для правильных ссылок
+                    channel_username = msg.get('channel', '@unknown')
+                    if not channel_username.startswith('@'):
+                        channel_username = '@' + channel_username
+                        
                     news_id = PendingNewsDB.add_pending_news(
                         channel_id=msg['channel_id'],
                         message_id=msg['id'],
-                        channel_name=msg.get('channel_display', msg.get('channel', 'Unknown')),
+                        channel_name=channel_username,  # Сохраняем @username
                         message_text=msg.get('text', ''),
                         summary=msg.get('summary', ''),
                         relevance_score=msg.get('relevance_score', 5),
@@ -724,7 +738,8 @@ class NewsCollector:
                     'summary': news['summary'],
                     'channel': news['channel_name'],
                     'channel_display': news['channel_name'],
-                    'relevance_score': news['relevance_score']
+                    'relevance_score': news['relevance_score'],
+                    'id': news['message_id']  # Добавляем ID сообщения для ссылки
                 })
             
             # Форматируем дайджест
