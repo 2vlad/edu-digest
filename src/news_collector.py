@@ -475,13 +475,13 @@ class NewsCollector:
             # Ссылка на конкретный пост: https://t.me/channel_name/message_id
             if message_id:
                 post_link = f"https://t.me/{clean_username}/{message_id}"
-                link_text = f"📎 {channel_display}"  # Добавляем иконку ссылки
+                link_text = channel_display  # Название канала как раньше
             else:
                 # Fallback на канал если нет ID сообщения
                 post_link = f"https://t.me/{clean_username}"
-                link_text = f"📢 {channel_display}"
+                link_text = channel_display
             
-            # Форматируем строку: — Заголовок / <a href="ссылка_на_пост">📎 Канал</a>
+            # Форматируем строку: — Заголовок / <a href="ссылка_на_пост">Канал</a>
             digest_lines.append(f'— {summary} / <a href="{post_link}">{link_text}</a>')
             
             # Добавляем отбивку между новостями (кроме последней)
