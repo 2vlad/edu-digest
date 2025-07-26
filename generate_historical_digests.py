@@ -136,10 +136,10 @@ class HistoricalDigestGenerator:
             logger.warning(f"⚠️ Нет сообщений для дайджеста {digest_type} за {target_date}")
             return {"success": False, "reason": "no_messages"}
         
-        # Ограничиваем количество новостей (максимум 10)
-        if len(messages) > 10:
-            logger.info(f"📝 Ограничиваем количество новостей: {len(messages)} → 10")
-            messages = messages[:10]
+        # Ограничиваем количество новостей (максимум 7)
+        if len(messages) > 7:
+            logger.info(f"📝 Ограничиваем количество новостей: {len(messages)} → 7")
+            messages = messages[:7]
         
         # Суммаризируем сообщения
         logger.info(f"🤖 Суммаризация {len(messages)} сообщений...")
@@ -187,7 +187,27 @@ class HistoricalDigestGenerator:
         }
         
         date_str = f"{target_date.day} {months_ru[target_date.month]}"
-        digest_title = f"{digest_type} дайджест {date_str}"
+        
+        # Используем динамическую систему заголовков в зависимости от времени
+        now = datetime.now()
+        current_hour = now.hour
+        
+        if digest_type == "Утренний":
+            if 6 <= current_hour < 12:
+                time_greeting = "Доброе утро!"
+            elif 12 <= current_hour < 18:
+                time_greeting = "Добрый день!"
+            else:
+                time_greeting = "Добрый вечер!"
+            digest_title = f"{time_greeting} Дайджест {date_str}"
+        else:  # Вечерний
+            if 6 <= current_hour < 12:
+                time_greeting = "Доброе утро!"
+            elif 12 <= current_hour < 18:
+                time_greeting = "Добрый день!"
+            else:
+                time_greeting = "Добрый вечер!"
+            digest_title = f"{time_greeting} Дайджест {date_str}"
         
         digest_lines = []
         digest_lines.append(digest_title)
@@ -195,20 +215,48 @@ class HistoricalDigestGenerator:
         
         # Форматируем сообщения
         for i, msg in enumerate(messages):
-            summary = msg.get('summary', msg['text'][:120] + '...')
-            
-            # Получаем название канала
-            channel_name = msg.get('channel', '').replace('@', '')
-            
-            # Создаем ссылку на канал (без конкретного сообщения для исторических)
-            channel_link = f"https://t.me/{channel_name}" if channel_name else ""
-            
-            if channel_link:
-                news_line = f"• {summary} [{channel_name}]({channel_link})"
+            # Используем суммаризацию или делаем fallback с очисткой
+            if 'summary' in msg and msg['summary']:
+                summary = msg['summary']
             else:
-                news_line = f"• {summary}"
+                # Fallback: очищаем и обрезаем оригинальный текст
+                text = msg['text']
+                
+                # Убираем markdown и форматирование (как в основной системе)
+                # Убираем лишние символы и ссылки (улучшенная очистка)
+                text = text.replace('**', '').replace('*', '')  # Убираем звездочки
+                text = text.replace('__', '').replace('_', '')  # Убираем подчеркивания  
+                text = text.replace('~~', '').replace('`', '')  # Убираем другое форматирование
+                text = text.split('\n')[0]  # Берем только первую строку
+                text = text.split('[')[0]   # Убираем ссылки в квадратных скобках
+                text = text.split('(http')[0]  # Убираем URL
+                text = text.strip()
+                
+                # Обрезаем до разумной длины
+                if len(text) > 120:
+                    # Ищем последнее слово в пределах 120 символов
+                    words = text[:120].split()
+                    if len(words) > 1:
+                        text = ' '.join(words[:-1]) + '...'
+                    else:
+                        text = text[:120] + '...'
+                
+                summary = text
             
-            digest_lines.append(news_line)
+            # Получаем название канала и создаем ссылку (как в основной системе)
+            channel_display = msg.get('channel_display', msg.get('channel', 'Unknown'))
+            channel_username = msg.get('channel', '')
+            
+            # Создаем ссылку на канал (убираем @ для правильной ссылки)
+            clean_username = channel_username.lstrip('@') if channel_username else 'unknown'
+            channel_link = f"https://t.me/{clean_username}"
+            
+            # Форматируем строку: — Заголовок / <a href="ссылка">Канал</a>
+            digest_lines.append(f'— {summary} / <a href="{channel_link}">{channel_display}</a>')
+            
+            # Добавляем отбивку между новостями (кроме последней)
+            if i < len(messages) - 1:
+                digest_lines.append("")
         
         # Добавляем эмодзи в конце
         digest_lines.append("")
