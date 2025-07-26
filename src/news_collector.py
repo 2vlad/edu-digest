@@ -387,31 +387,35 @@ class NewsCollector:
         
         logger.info(f"📝 Форматирование дайджеста из {len(messages)} сообщений...")
         
-        # Определяем время суток для заголовка
-        from datetime import timezone
-        now_msk = datetime.now(timezone.utc).replace(tzinfo=timezone.utc).astimezone(timezone.utc)
-        # Приводим к московскому времени (UTC+3)
-        msk_offset = timedelta(hours=3)
-        now_msk = now_msk + msk_offset
+        # Определяем время суток для заголовка в московском времени
+        try:
+            from .timezone_utils import now_moscow, get_digest_type_by_moscow_time
+            now_msk = now_moscow()
+        except ImportError:
+            # Fallback если timezone_utils недоступен
+            from datetime import timezone
+            now_msk = datetime.now(timezone.utc) + timedelta(hours=3)
         
         current_time = now_msk.time()
         current_date = now_msk.date()
         
-        # Определяем тип дайджеста по времени
-        from datetime import time
-        
-        if time(0, 0) <= current_time <= time(12, 29):
-            # С 00:00 до 12:29 - утренний дайджест текущего дня
-            digest_type = "Утренний"
+        # Определяем тип дайджеста по московскому времени
+        try:
+            digest_type = get_digest_type_by_moscow_time(now_msk)
             digest_date = current_date
-        elif time(12, 30) <= current_time <= time(17, 30):
-            # С 12:30 до 17:30 - дневной дайджест
-            digest_type = "Дневной" 
-            digest_date = current_date
-        else:
-            # С 17:31 до 23:59 - вечерний дайджест
-            digest_type = "Вечерний"
-            digest_date = current_date
+        except NameError:
+            # Fallback если функция недоступна
+            from datetime import time
+            
+            if time(0, 0) <= current_time <= time(12, 29):
+                digest_type = "Утренний"
+                digest_date = current_date
+            elif time(12, 30) <= current_time <= time(17, 30):
+                digest_type = "Дневной" 
+                digest_date = current_date
+            else:
+                digest_type = "Вечерний"
+                digest_date = current_date
         
         # Форматируем дату по-русски
         months_ru = {
@@ -549,21 +553,29 @@ class NewsCollector:
         try:
             logger.info("💾 Сохраняем новости в очередь...")
             
-            # Определяем время и тип дайджеста
-            from datetime import timezone
-            now_msk = datetime.now(timezone.utc).replace(tzinfo=timezone.utc).astimezone(timezone.utc)
-            msk_offset = timedelta(hours=3)
-            now_msk = now_msk + msk_offset
+            # Определяем время и тип дайджеста в московском времени
+            try:
+                from .timezone_utils import now_moscow, get_digest_type_by_moscow_time
+                now_msk = now_moscow()
+            except ImportError:
+                # Fallback если timezone_utils недоступен
+                from datetime import timezone
+                now_msk = datetime.now(timezone.utc) + timedelta(hours=3)
             
-            current_time = now_msk.time()
-            from datetime import time
-            
-            if time(0, 0) <= current_time <= time(12, 29):
-                digest_type = "Утренний"
-            elif time(12, 30) <= current_time <= time(17, 30):
-                digest_type = "Дневной" 
-            else:
-                digest_type = "Вечерний"
+            # Определяем тип дайджеста по московскому времени
+            try:
+                digest_type = get_digest_type_by_moscow_time(now_msk)
+            except NameError:
+                # Fallback если функция недоступна
+                current_time = now_msk.time()
+                from datetime import time
+                
+                if time(0, 0) <= current_time <= time(12, 29):
+                    digest_type = "Утренний"
+                elif time(12, 30) <= current_time <= time(17, 30):
+                    digest_type = "Дневной" 
+                else:
+                    digest_type = "Вечерний"
             
             scheduled_for = now_msk.date()
             

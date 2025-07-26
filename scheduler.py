@@ -10,9 +10,13 @@ import logging
 import schedule
 import time
 from datetime import datetime, timezone
+import pytz
 
 # Добавляем путь к src модулям
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+
+# Московский часовой пояс
+MOSCOW_TZ = pytz.timezone('Europe/Moscow')
 
 # Настройка логирования
 os.makedirs('logs', exist_ok=True)
@@ -28,17 +32,41 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def get_schedule_times():
-    """Получаем время запуска из настроек"""
+    """Получаем время запуска из настроек (московское время)"""
     try:
         from src.database import SettingsDB
         digest_times = SettingsDB.get_setting('digest_times', '12:00,18:00')
         times = [t.strip() for t in digest_times.split(',') if t.strip()]
-        logger.info(f"📅 Время публикации из настроек: {times}")
+        logger.info(f"📅 Время публикации из настроек (MSK): {times}")
         return times
     except Exception as e:
         logger.error(f"❌ Ошибка получения времени из настроек: {e}")
         # Fallback к значениям по умолчанию
         return ['12:00', '18:00']
+
+def schedule_moscow_time(time_str: str, job_func):
+    """Планирование задания на московское время"""
+    try:
+        # Парсим время
+        hour, minute = map(int, time_str.split(':'))
+        
+        def moscow_job():
+            """Обертка для выполнения задания с проверкой московского времени"""
+            moscow_now = datetime.now(MOSCOW_TZ)
+            current_hour = moscow_now.hour
+            current_minute = moscow_now.minute
+            
+            # Проверяем что сейчас нужное время в Москве (с допуском в 1 минуту)
+            if abs(current_hour - hour) == 0 and abs(current_minute - minute) <= 1:
+                logger.info(f"🕐 Запуск задания в московское время: {moscow_now.strftime('%H:%M MSK')}")
+                job_func()
+            else:
+                logger.debug(f"⏰ Пропуск: текущее время MSK {current_hour:02d}:{current_minute:02d}, ожидаем {hour:02d}:{minute:02d}")
+        
+        return moscow_job
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания московского расписания для {time_str}: {e}")
+        return job_func
 
 def run_news_collection():
     """Запуск сбора новостей (накопление)"""
@@ -110,8 +138,8 @@ def publish_accumulated_news():
         logger.error(f"📋 Traceback: {traceback.format_exc()}")
 
 def setup_schedule():
-    """Настройка расписания"""
-    logger.info("⏰ Настройка расписания автоматических запусков...")
+    """Настройка расписания (все времена в московском часовом поясе)"""
+    logger.info("⏰ Настройка расписания автоматических запусков (московское время)...")
     
     # Очищаем предыдущие задания
     schedule.clear()
@@ -120,33 +148,38 @@ def setup_schedule():
     schedule.every().hour.do(run_news_collection)
     logger.info("📅 Настроен почасовой сбор новостей")
     
-    # Получаем время публикации из настроек
+    # Получаем время публикации из настроек (московское время)
     times = get_schedule_times()
     
-    # Настраиваем публикацию для каждого времени
+    # Настраиваем публикацию для каждого времени в московском часовом поясе
     for time_str in times:
         try:
             # Проверяем формат времени
             datetime.strptime(time_str, '%H:%M')
             
-            # Добавляем задание публикации
-            schedule.every().day.at(time_str).do(publish_accumulated_news)
-            logger.info(f"📅 Настроена публикация дайджеста в {time_str} каждый день")
+            # Создаем обертку для московского времени
+            moscow_job = schedule_moscow_time(time_str, publish_accumulated_news)
+            
+            # Планируем проверку каждую минуту (schedule будет проверять московское время)
+            schedule.every().minute.do(moscow_job)
+            logger.info(f"📅 Настроена публикация дайджеста в {time_str} MSK каждый день")
             
         except ValueError:
             logger.error(f"❌ Неверный формат времени: {time_str}. Ожидается HH:MM")
     
     # Если не удалось настроить публикацию, используем значения по умолчанию
-    publication_jobs = [job for job in schedule.jobs if job.job_func == publish_accumulated_news]
-    if not publication_jobs:
+    if not times or len(times) == 0:
         logger.warning("⚠️ Не удалось настроить публикацию! Используем значения по умолчанию")
-        schedule.every().day.at("12:00").do(publish_accumulated_news)
-        schedule.every().day.at("18:00").do(publish_accumulated_news)
-        logger.info("📅 Настроена публикация по умолчанию: 12:00 и 18:00")
+        for default_time in ["12:00", "18:00"]:
+            moscow_job = schedule_moscow_time(default_time, publish_accumulated_news)
+            schedule.every().minute.do(moscow_job)
+        logger.info("📅 Настроена публикация по умолчанию: 12:00 и 18:00 MSK")
     
-    logger.info(f"✅ Настроено {len(schedule.jobs)} автоматических заданий:"
-                f" {len([j for j in schedule.jobs if j.job_func == run_news_collection])} сбор,"
-                f" {len([j for j in schedule.jobs if j.job_func == publish_accumulated_news])} публикация")
+    logger.info(f"✅ Настроено {len(schedule.jobs)} автоматических заданий в московском времени")
+    
+    # Показываем текущее время
+    moscow_now = datetime.now(MOSCOW_TZ)
+    logger.info(f"🕐 Текущее московское время: {moscow_now.strftime('%Y-%m-%d %H:%M:%S MSK')}")
 
 def log_next_runs():
     """Логируем информацию о следующих запусках"""
@@ -165,8 +198,15 @@ def main():
     """Основная функция планировщика"""
     logger.info("🤖 Запуск планировщика EdTech News Digest...")
     logger.info("=" * 60)
-    logger.info(f"📅 Время запуска: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"🌍 Часовой пояс: {datetime.now().astimezone().tzinfo}")
+    
+    # Показываем время в московском часовом поясе
+    moscow_now = datetime.now(MOSCOW_TZ)
+    logger.info(f"📅 Время запуска (MSK): {moscow_now.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"🌍 Часовой пояс: Europe/Moscow (UTC+3)")
+    
+    # Также показываем локальное время сервера для сравнения
+    local_now = datetime.now()
+    logger.info(f"🖥️ Локальное время сервера: {local_now.strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 60)
     
     # Настраиваем расписание

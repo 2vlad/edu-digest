@@ -9,3 +9,4 @@ gunicorn==21.2.0
 psycopg2-binary
 supabase==2.3.4
 httpx>=0.24,<0.26
+pytz==2023.3
