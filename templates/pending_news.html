@@ -25,12 +25,23 @@
 <!-- Кнопка создания таблицы если она отсутствует -->
 <div class="alert alert-warning">
     <h6><i class="fas fa-exclamation-triangle"></i> Таблица pending_news отсутствует</h6>
-    <p>Если вы видите ошибки "relation does not exist", нужно создать таблицу:</p>
-    <form method="POST" action="{{ url_for('create_pending_table') }}" class="d-inline">
-        <button type="submit" class="btn btn-warning" onclick="return confirm('Создать таблицу pending_news?')">
-            <i class="fas fa-plus"></i> Создать таблицу pending_news
-        </button>
-    </form>
+    <p>Если вы видите ошибки "relation does not exist", нужно создать таблицу в Supabase:</p>
+    <ol>
+        <li>Откройте <a href="https://supabase.com/dashboard" target="_blank">Supabase Dashboard</a></li>
+        <li>Выберите ваш проект edu-digest</li>
+        <li>Перейдите в SQL Editor</li>
+        <li>Скопируйте и выполните SQL из файла <code>create_pending_news_table.sql</code></li>
+    </ol>
+    <div class="d-flex gap-2">
+        <form method="POST" action="{{ url_for('create_pending_table') }}" class="d-inline">
+            <button type="submit" class="btn btn-warning" onclick="return confirm('Показать SQL для создания таблицы?')">
+                <i class="fas fa-code"></i> Показать SQL для Supabase
+            </button>
+        </form>
+        <a href="https://supabase.com/dashboard" target="_blank" class="btn btn-info">
+            <i class="fas fa-external-link-alt"></i> Открыть Supabase
+        </a>
+    </div>
 </div>
 {% else %}
     {% for group_key, news_list in grouped_news.items() %}
