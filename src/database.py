@@ -848,8 +848,19 @@ class ProcessedMessagesDB:
         """Проверка, было ли сообщение уже обработано"""
         try:
             conn = supabase_db.get_connection()
-            cursor = conn.cursor()
+            if conn is None:
+                # Используем REST API fallback
+                try:
+                    result = supabase_db.execute_rest_query(
+                        'processed_messages', 'GET', 
+                        filters={'channel_id': channel_id, 'message_id': message_id}
+                    )
+                    return len(result) > 0 if result else False
+                except Exception as api_error:
+                    logger.error(f"❌ REST API fallback failed for message check: {api_error}")
+                    return False
             
+            cursor = conn.cursor()
             cursor.execute('''
                 SELECT 1 FROM processed_messages 
                 WHERE channel_id = %s AND message_id = %s
@@ -868,8 +879,29 @@ class ProcessedMessagesDB:
         """Отметка сообщения как обработанного"""
         try:
             conn = supabase_db.get_connection()
-            cursor = conn.cursor()
+            if conn is None:
+                # Используем REST API fallback
+                try:
+                    data = {
+                        'channel_id': channel_id,
+                        'message_id': message_id,
+                        'message_text': message_text,
+                        'summary': summary,
+                        'processed_at': datetime.now().isoformat()
+                    }
+                    result = supabase_db.execute_rest_query('processed_messages', 'POST', data=data)
+                    if result and len(result) > 0:
+                        record_id = result[0].get('id', 0)
+                        logger.info(f"✅ Сообщение {message_id} отмечено через REST API (ID: {record_id})")
+                        return record_id
+                    else:
+                        logger.warning(f"⚠️ REST API не вернул ID для сообщения {message_id}")
+                        return 0
+                except Exception as api_error:
+                    logger.error(f"❌ REST API fallback failed for marking message: {api_error}")
+                    return 0
             
+            cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO processed_messages 
                 (channel_id, message_id, message_text, summary, processed_at)

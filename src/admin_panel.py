@@ -317,7 +317,19 @@ def dashboard():
             recent_logs = [dict(row) for row in cursor.fetchall()]
             logger.info(f"✅ Retrieved {len(recent_logs)} recent logs")
         else:
-            logger.warning("⚠️ No connection for recent logs")
+            logger.warning("⚠️ No PostgreSQL connection, using REST API fallback for logs...")
+            try:
+                from .database import supabase_db
+                logs_data = supabase_db.execute_rest_query('run_logs', 'GET')
+                if logs_data:
+                    # Сортируем по started_at и берем последние 10
+                    sorted_logs = sorted(logs_data, key=lambda x: x.get('started_at', ''), reverse=True)
+                    recent_logs = sorted_logs[:10]
+                    logger.info(f"✅ Retrieved {len(recent_logs)} recent logs via REST API")
+                else:
+                    logger.warning("⚠️ No logs data from REST API")
+            except Exception as api_error:
+                logger.error(f"❌ REST API fallback for logs failed: {api_error}")
     except Exception as e:
         logger.error(f"❌ Error getting recent logs: {e}")
         recent_logs = []
@@ -548,9 +560,22 @@ def logs():
     try:
         conn = get_db()
         if conn is None:
-            logger.warning("⚠️ PostgreSQL недоступен для получения логов")
-            run_logs = []
-            flash('База данных недоступна. Логи не могут быть загружены.', 'warning')
+            logger.warning("⚠️ PostgreSQL недоступен, используем REST API fallback для логов")
+            try:
+                from .database import supabase_db
+                logs_data = supabase_db.execute_rest_query('run_logs', 'GET')
+                if logs_data:
+                    # Сортируем по started_at и берем последние 50
+                    sorted_logs = sorted(logs_data, key=lambda x: x.get('started_at', ''), reverse=True)
+                    run_logs = sorted_logs[:50]
+                    logger.info(f"✅ Retrieved {len(run_logs)} log entries via REST API")
+                else:
+                    run_logs = []
+                    flash('Логи пока недоступны', 'info')
+            except Exception as api_error:
+                logger.error(f"❌ REST API fallback for logs failed: {api_error}")
+                run_logs = []
+                flash('Ошибка получения логов через REST API', 'error')
         else:
             cursor = conn.cursor()
             
